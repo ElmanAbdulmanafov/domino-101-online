@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Domino 101</string>
+    <string name="title_activity_main">Domino 101</string>
+    <string name="package_name">az.domino101.online</string>
+    <string name="custom_url_scheme">az.domino101.online</string>
+</resources>

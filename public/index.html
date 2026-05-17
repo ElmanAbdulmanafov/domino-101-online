@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="az">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#101820" />
+    <title>Domino Online</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="topbar">
+        <div class="brand">
+          <div class="brand-mark">5</div>
+          <div>
+            <p class="eyebrow">Online masa</p>
+            <h1>Domino</h1>
+          </div>
+        </div>
+        <div id="connection" class="connection">Qosulur...</div>
+      </section>
+
+      <section id="auth" class="setup auth-panel">
+        <label>
+          Ad soyad
+          <input id="registerNameInput" maxlength="18" placeholder="Mes: Elman" autocomplete="name" />
+        </label>
+        <label>
+          Istifadeci adi
+          <input id="registerUsernameInput" maxlength="24" placeholder="Mes: elman101" autocomplete="username" />
+        </label>
+        <label>
+          Telefon
+          <input id="registerPhoneInput" maxlength="18" placeholder="+994..." inputmode="tel" autocomplete="tel" />
+        </label>
+        <button id="registerButton" class="primary" type="button">Qeydiyyatdan kec</button>
+        <p id="authError" class="error"></p>
+      </section>
+
+      <section id="setup" class="setup hidden">
+        <div class="profile-bar">
+          <div>
+            <p class="eyebrow">Profil</p>
+            <strong id="profileName">Oyuncu</strong>
+          </div>
+          <button id="logoutButton" type="button">Cixis</button>
+        </div>
+
+        <label>
+          Adin
+          <input id="nameInput" maxlength="18" placeholder="Mes: Elman" autocomplete="nickname" />
+        </label>
+
+        <div class="choice-group" aria-label="Oyun novu">
+          <button id="game101Button" class="choice active" type="button">101</button>
+          <button id="gamePhoneButton" class="choice" type="button">Telefon</button>
+        </div>
+
+        <div class="choice-group" aria-label="Oynama formasi">
+          <button id="onlineModeButton" class="choice active" type="button">Online</button>
+          <button id="botModeButton" class="choice" type="button">Botla oyna</button>
+        </div>
+
+        <div id="botCountWrap" class="bot-count" hidden>
+          <span>Bot sayi</span>
+          <div class="choice-group compact" aria-label="Bot sayi">
+            <button id="botOneButton" class="choice active" type="button">1</button>
+            <button id="botTwoButton" class="choice" type="button">2</button>
+            <button id="botThreeButton" class="choice" type="button">3</button>
+          </div>
+        </div>
+
+        <details class="server-settings">
+          <summary>Server ayari</summary>
+          <label>
+            Server
+            <input id="serverInput" placeholder="192.168.1.6:4173" inputmode="url" />
+          </label>
+        </details>
+
+        <div class="actions">
+          <button id="createRoomButton" class="primary">Otaq yarat</button>
+          <div id="joinByCode" class="join">
+            <input id="roomInput" maxlength="6" placeholder="Otaq kodu" />
+            <button id="joinRoomButton">Qosul</button>
+          </div>
+        </div>
+
+        <div id="lobby" class="lobby">
+          <div class="lobby-head">
+            <p class="eyebrow">Hazir otaqlar</p>
+            <button id="refreshRoomsButton" type="button">Yenile</button>
+          </div>
+          <div id="roomList" class="room-list"></div>
+        </div>
+
+        <div class="profile-history">
+          <div class="lobby-head">
+            <p class="eyebrow">Oyun tarixcem</p>
+            <button id="refreshHistoryButton" type="button">Yenile</button>
+          </div>
+          <div id="profileHistory" class="profile-history-list"></div>
+        </div>
+
+        <p id="error" class="error"></p>
+      </section>
+
+      <section id="room" class="room hidden">
+        <div class="room-head">
+          <div>
+            <p id="roomMeta" class="eyebrow">Otaq kodu</p>
+            <button id="copyCodeButton" class="code">------</button>
+          </div>
+          <div class="room-actions">
+            <div id="roundBadge" class="round-badge">El 0</div>
+            <button id="leaveRoomButton" type="button">Oyundan cix</button>
+            <button id="startButton" class="primary">Baslat</button>
+          </div>
+        </div>
+
+        <p id="message" class="message"></p>
+
+        <div class="table-area">
+          <div id="seatTop" class="seat seat-top"></div>
+          <div id="seatLeft" class="seat seat-left"></div>
+          <div id="board" class="board"></div>
+          <div id="seatRight" class="seat seat-right"></div>
+          <div id="seatBottom" class="seat seat-bottom"></div>
+        </div>
+
+        <div class="playbar">
+          <button id="playLeftButton">Sola qoy</button>
+          <button id="passButton">Pass / das gotur</button>
+          <button id="playRightButton">Saga qoy</button>
+        </div>
+
+        <div id="hand" class="hand"></div>
+
+        <section class="score-panel">
+          <div class="score-head">
+            <p class="eyebrow">Xal cedveli</p>
+            <strong id="scoreTarget">0</strong>
+          </div>
+          <div id="scoreboard" class="scoreboard"></div>
+        </section>
+
+        <div class="history">
+          <p class="eyebrow">Gedisler</p>
+          <div id="log"></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

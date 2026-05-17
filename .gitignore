@@ -1,0 +1,10 @@
+node_modules/
+android/.gradle/
+android/app/build/
+android/build/
+*.log
+data/game-history.json
+firebase-service-account*.json
+*-firebase-adminsdk-*.json
+dist/
+.DS_Store

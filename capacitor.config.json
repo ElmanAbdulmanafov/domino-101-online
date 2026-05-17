@@ -1,0 +1,8 @@
+{
+  "appId": "az.domino101.online",
+  "appName": "Domino 101",
+  "webDir": "public",
+  "server": {
+    "androidScheme": "https"
+  }
+}
