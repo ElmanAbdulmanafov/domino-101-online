@@ -676,7 +676,9 @@ function renderBoard(game) {
   }).join("");
   const branchHtml = branchPath.map((point) => {
     const tile = point.tile;
-    return `<div class="board-slot phone-branch" style="grid-column:${point.col + 1};grid-row:${point.row + 1};">${domino(tile.left, tile.right, false, "", tile.double, false, true)}</div>`;
+    const visualTop = point.branch === "top" ? tile.right : tile.left;
+    const visualBottom = point.branch === "top" ? tile.left : tile.right;
+    return `<div class="board-slot phone-branch" style="grid-column:${point.col + 1};grid-row:${point.row + 1};">${domino(visualTop, visualBottom, false, "", tile.double, false, true)}</div>`;
   }).join("");
   els.board.innerHTML = mainHtml + branchHtml;
 }
@@ -686,10 +688,10 @@ function phoneBranchSlots(phone, phonePoint) {
   const topTiles = phone.top?.tiles || [];
   const bottomTiles = phone.bottom?.tiles || [];
   topTiles.forEach((tile, index) => {
-    slots.push({ col: phonePoint.col, row: phonePoint.row - index - 1, vertical: true, tile });
+    slots.push({ col: phonePoint.col, row: phonePoint.row - index - 1, vertical: true, branch: "top", tile });
   });
   bottomTiles.forEach((tile, index) => {
-    slots.push({ col: phonePoint.col, row: phonePoint.row + index + 1, vertical: true, tile });
+    slots.push({ col: phonePoint.col, row: phonePoint.row + index + 1, vertical: true, branch: "bottom", tile });
   });
   return slots;
 }
