@@ -452,9 +452,11 @@ function startRound(room) {
   const opening = chooseOpening(room, hands);
 
   room.game = {
+    gameType: room.gameType,
     board: [],
     left: null,
     right: null,
+    phone: null,
     boneyard: deck,
     hands,
     turnPlayerId: opening.playerId,
@@ -539,9 +541,14 @@ function playTile(room, playerId, tileId, side) {
 
   if (move.side === "left") {
     game.board.unshift(move.tile);
-  } else {
+  } else if (move.side === "right") {
     game.board.push(move.tile);
+  } else if (move.side === "phoneTop" || move.side === "phoneBottom") {
+    const branch = move.side === "phoneTop" ? game.phone.top : game.phone.bottom;
+    branch.tiles.push(move.tile);
+    branch.end = move.end;
   }
+  refreshPhone(game);
 
   const player = room.players.find((p) => p.id === playerId);
   addLog(room, `${player?.name || "Oyuncu"} ${tile.a}:${tile.b} qoydu.`);
@@ -578,7 +585,7 @@ function passTurn(room, playerId) {
   if (game.turnPlayerId !== playerId) return;
 
   const hand = game.hands[playerId] || [];
-  const playable = hand.some((tile) => normalizeMove(game, tile, "left") || normalizeMove(game, tile, "right"));
+  const playable = hand.some((tile) => playableSides(game, tile).length);
   const player = room.players.find((p) => p.id === playerId);
 
   if (playable) {
@@ -589,7 +596,7 @@ function passTurn(room, playerId) {
   if (game.boneyard.length > 0) {
     const tile = game.boneyard.pop();
     hand.push(tile);
-    const canPlayAfterDraw = normalizeMove(game, tile, "left") || normalizeMove(game, tile, "right");
+    const canPlayAfterDraw = playableSides(game, tile).length > 0;
     game.message = canPlayAfterDraw
       ? `${player?.name || "Oyuncu"} bazardan oynaya bileceyi das goturdu.`
       : `${player?.name || "Oyuncu"} bazardan das goturdu, yenede das yoxdur.`;
@@ -1183,6 +1190,7 @@ function persistAccountToFirestore(account) {
 }
 
 function normalizeMove(game, tile, side) {
+  refreshPhone(game);
   if (game.board.length === 0) {
     return { side: "right", tile: boardTile(tile, tile.a, tile.b), left: tile.a, right: tile.b };
   }
@@ -1197,11 +1205,25 @@ function normalizeMove(game, tile, side) {
     if (tile.b === game.right) return { side, tile: boardTile(tile, tile.b, tile.a), left: game.left, right: tile.a };
   }
 
+  if ((side === "phoneTop" || side === "phoneBottom") && game.phone) {
+    const branch = side === "phoneTop" ? game.phone.top : game.phone.bottom;
+    const needed = branch.end;
+    if (tile.a === needed) return { side, tile: boardTile(tile, tile.a, tile.b), left: game.left, right: game.right, end: tile.b };
+    if (tile.b === needed) return { side, tile: boardTile(tile, tile.b, tile.a), left: game.left, right: game.right, end: tile.a };
+  }
+
   return null;
 }
 
 function boardTile(tile, left, right) {
   return { ...tile, left, right, double: tile.a === tile.b };
+}
+
+function playableSides(game, tile) {
+  const sides = ["left", "right"];
+  refreshPhone(game);
+  if (game.phone) sides.push("phoneTop", "phoneBottom");
+  return sides.filter((side) => normalizeMove(game, tile, side));
 }
 
 function nextPlayer(room, playerId) {
@@ -1247,6 +1269,7 @@ function findLowestDoubleOwner(room, hands) {
 }
 
 function phoneScore(game) {
+  refreshPhone(game);
   if (!game.board.length) return 0;
   if (game.board.length === 1) {
     const only = game.board[0];
@@ -1258,8 +1281,28 @@ function phoneScore(game) {
   const rightTile = game.board[game.board.length - 1];
   const leftValue = leftTile.double ? Number(game.left || 0) * 2 : Number(game.left || 0);
   const rightValue = rightTile.double ? Number(game.right || 0) * 2 : Number(game.right || 0);
-  const total = leftValue + rightValue;
+  const total = leftValue + rightValue + phoneBranchScore(game.phone?.top) + phoneBranchScore(game.phone?.bottom);
   return total > 0 && total % 5 === 0 ? total : 0;
+}
+
+function refreshPhone(game) {
+  if (!game || game.gameType !== "phone" || game.phone || game.board.length < 3) return;
+  const index = game.board.findIndex((tile, tileIndex) => tile.double && tileIndex > 0 && tileIndex < game.board.length - 1);
+  if (index < 0) return;
+  const tile = game.board[index];
+  game.phone = {
+    tileId: tile.id,
+    value: tile.left,
+    top: { end: tile.left, tiles: [] },
+    bottom: { end: tile.left, tiles: [] }
+  };
+}
+
+function phoneBranchScore(branch) {
+  if (!branch) return 0;
+  const last = branch.tiles[branch.tiles.length - 1];
+  if (!last) return Number(branch.end || 0);
+  return last.double ? Number(branch.end || 0) * 2 : Number(branch.end || 0);
 }
 
 function maybeRunBot(room) {
@@ -1292,8 +1335,7 @@ function findBotMove(game, hand) {
 
   const moves = [];
   for (const tile of hand) {
-    if (normalizeMove(game, tile, "left")) moves.push({ tile, side: "left" });
-    if (normalizeMove(game, tile, "right")) moves.push({ tile, side: "right" });
+    for (const side of playableSides(game, tile)) moves.push({ tile, side });
   }
   if (!moves.length) return null;
 
@@ -1386,6 +1428,7 @@ function serializeRoom(room, viewerId) {
     game: game
       ? {
           board: game.board,
+          phone: game.phone,
           left: game.left,
           right: game.right,
           boneyardCount: game.boneyard.length,

@@ -850,9 +850,23 @@ h1 {
 
 .playbar {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin-top: 6px;
+}
+
+.playbar .phone-action {
+  background: #2b3e46;
+  color: #f1bc5b;
+}
+
+.phone-hub .domino {
+  outline: 3px solid #58c5ff;
+  box-shadow: 0 0 0 5px rgba(88, 197, 255, 0.16), 0 9px 14px rgba(0, 0, 0, 0.26);
+}
+
+.phone-branch .domino {
+  outline: 2px solid rgba(88, 197, 255, 0.44);
 }
 
 .chat-panel {
@@ -1294,6 +1308,7 @@ h1 {
     position: sticky;
     bottom: max(4px, env(safe-area-inset-bottom));
     z-index: 5;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     margin-top: 4px;
     padding: 5px;
     border-radius: 8px;
@@ -1308,5 +1323,9 @@ h1 {
     padding: 0 8px;
     font-size: 0.82rem;
     font-weight: 900;
+  }
+
+  .playbar .phone-action {
+    grid-column: span 1;
   }
 }

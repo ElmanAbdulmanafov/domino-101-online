@@ -91,6 +91,8 @@ const els = {
   error: document.querySelector("#error"),
   playLeftButton: document.querySelector("#playLeftButton"),
   playRightButton: document.querySelector("#playRightButton"),
+  playPhoneTopButton: document.querySelector("#playPhoneTopButton"),
+  playPhoneBottomButton: document.querySelector("#playPhoneBottomButton"),
   passButton: document.querySelector("#passButton")
 };
 
@@ -186,6 +188,8 @@ function bindControls() {
 
   els.playLeftButton.addEventListener("click", () => playSelected("left"));
   els.playRightButton.addEventListener("click", () => playSelected("right"));
+  els.playPhoneTopButton.addEventListener("click", () => playSelected("phoneTop"));
+  els.playPhoneBottomButton.addEventListener("click", () => playSelected("phoneBottom"));
   els.passButton.addEventListener("click", () => send({ type: "passTurn" }));
 }
 
@@ -578,6 +582,10 @@ function render() {
 
   els.playLeftButton.disabled = !isMyTurn || !state.selectedTileId || !canPlaySelected("left");
   els.playRightButton.disabled = !isMyTurn || !state.selectedTileId || !canPlaySelected("right");
+  els.playPhoneTopButton.hidden = !game?.phone;
+  els.playPhoneBottomButton.hidden = !game?.phone;
+  els.playPhoneTopButton.disabled = !isMyTurn || !state.selectedTileId || !canPlaySelected("phoneTop");
+  els.playPhoneBottomButton.disabled = !isMyTurn || !state.selectedTileId || !canPlaySelected("phoneBottom");
   els.passButton.disabled = !isMyTurn;
 
   for (const button of els.hand.querySelectorAll(".domino")) {
@@ -646,16 +654,44 @@ function renderBoard(game) {
   }
 
   const path = boardPath(game.board.length);
-  const cols = Math.max(...path.map((point) => point.col)) + 1;
-  const rows = Math.max(...path.map((point) => point.row)) + 1;
+  const phoneIndex = game.phone ? game.board.findIndex((tile) => tile.id === game.phone.tileId) : -1;
+  const phonePoint = phoneIndex >= 0 ? path[phoneIndex] : null;
+  const branchSlots = phonePoint ? phoneBranchSlots(game.phone, phonePoint) : [];
+  const allPoints = path.concat(branchSlots);
+  const minRow = Math.min(...allPoints.map((point) => point.row));
+  const minCol = Math.min(...allPoints.map((point) => point.col));
+  const normalized = allPoints.map((point) => ({ ...point, col: point.col - minCol, row: point.row - minRow }));
+  const mainPath = normalized.slice(0, path.length);
+  const branchPath = normalized.slice(path.length);
+  const cols = Math.max(...normalized.map((point) => point.col)) + 1;
+  const rows = Math.max(...normalized.map((point) => point.row)) + 1;
   els.board.style.setProperty("--board-cols", String(cols));
   els.board.style.setProperty("--board-rows", String(rows));
-  els.board.innerHTML = game.board.map((tile, index) => {
-    const point = path[index];
+  const mainHtml = game.board.map((tile, index) => {
+    const point = mainPath[index];
     const visualLeft = point.reverse && !point.vertical ? tile.right : tile.left;
     const visualRight = point.reverse && !point.vertical ? tile.left : tile.right;
-    return `<div class="board-slot" style="grid-column:${point.col + 1};grid-row:${point.row + 1};">${domino(visualLeft, visualRight, false, "", tile.double || point.vertical, false, point.vertical)}</div>`;
+    const isPhone = game.phone?.tileId === tile.id;
+    return `<div class="board-slot ${isPhone ? "phone-hub" : ""}" style="grid-column:${point.col + 1};grid-row:${point.row + 1};">${domino(visualLeft, visualRight, false, "", tile.double || point.vertical, false, point.vertical)}</div>`;
   }).join("");
+  const branchHtml = branchPath.map((point) => {
+    const tile = point.tile;
+    return `<div class="board-slot phone-branch" style="grid-column:${point.col + 1};grid-row:${point.row + 1};">${domino(tile.left, tile.right, false, "", tile.double, false, true)}</div>`;
+  }).join("");
+  els.board.innerHTML = mainHtml + branchHtml;
+}
+
+function phoneBranchSlots(phone, phonePoint) {
+  const slots = [];
+  const topTiles = phone.top?.tiles || [];
+  const bottomTiles = phone.bottom?.tiles || [];
+  topTiles.forEach((tile, index) => {
+    slots.push({ col: phonePoint.col, row: phonePoint.row - index - 1, vertical: true, tile });
+  });
+  bottomTiles.forEach((tile, index) => {
+    slots.push({ col: phonePoint.col, row: phonePoint.row + index + 1, vertical: true, tile });
+  });
+  return slots;
 }
 
 function boardPath(length) {
@@ -747,6 +783,8 @@ function updatePlayButtons() {
   const isMyTurn = game?.turnPlayerId === state.clientId && !game.roundOver;
   els.playLeftButton.disabled = !isMyTurn || !state.selectedTileId || !canPlaySelected("left");
   els.playRightButton.disabled = !isMyTurn || !state.selectedTileId || !canPlaySelected("right");
+  els.playPhoneTopButton.disabled = !isMyTurn || !state.selectedTileId || !canPlaySelected("phoneTop");
+  els.playPhoneBottomButton.disabled = !isMyTurn || !state.selectedTileId || !canPlaySelected("phoneBottom");
 }
 
 function playSelected(side) {
@@ -762,7 +800,12 @@ function canPlaySelected(side) {
   if (game.requiredOpeningTileId && game.board.length === 0 && tile.id !== game.requiredOpeningTileId) return false;
   if (game.board.length === 0) return true;
   if (side === "left") return tile.a === game.left || tile.b === game.left;
-  return tile.a === game.right || tile.b === game.right;
+  if (side === "right") return tile.a === game.right || tile.b === game.right;
+  if (side === "phoneTop" || side === "phoneBottom") {
+    const branch = side === "phoneTop" ? game.phone?.top : game.phone?.bottom;
+    return Boolean(branch && (tile.a === branch.end || tile.b === branch.end));
+  }
+  return false;
 }
 
 function domino(a, b, interactive, id = "", isDouble = false, required = false, forceVertical = false) {
