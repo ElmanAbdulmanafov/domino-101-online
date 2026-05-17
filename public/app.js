@@ -74,6 +74,12 @@ bindControls();
 connect();
 renderSetup();
 
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  window.clearTimeout(resizeTimer);
+  resizeTimer = window.setTimeout(() => renderBoard(state.room?.game), 120);
+});
+
 function bindControls() {
   els.registerButton.addEventListener("click", registerFromForm);
   els.logoutButton.addEventListener("click", () => {
