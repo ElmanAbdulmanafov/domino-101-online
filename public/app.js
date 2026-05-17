@@ -1,3 +1,5 @@
+const DEFAULT_SERVER_HOST = "domino-101-online.onrender.com";
+
 const state = {
   clientId: null,
   profile: loadSavedProfile(),
@@ -329,17 +331,21 @@ function renderProfileHistory() {
 function savedServerAddress() {
   const saved = localStorage.getItem("domino101Server");
   if (saved) return saved.replace(/^wss?:\/\//, "");
-  if (location.protocol.startsWith("http") && location.host) return location.host;
-  return "192.168.1.6:4173";
+  if (location.protocol.startsWith("http") && location.host && !isLocalAppHost(location.host)) return location.host;
+  return DEFAULT_SERVER_HOST;
 }
 
 function normalizeServerAddress(value) {
-  const raw = String(value || "").trim() || location.host || "192.168.1.6:4173";
+  const raw = String(value || "").trim() || DEFAULT_SERVER_HOST;
   if (raw.startsWith("ws://") || raw.startsWith("wss://")) return raw;
   if (raw.startsWith("https://")) return `wss://${raw.replace(/^https?:\/\//, "")}`;
   if (raw.startsWith("http://")) return `ws://${raw.replace(/^https?:\/\//, "")}`;
-  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  const protocol = raw.includes("onrender.com") || location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${raw.replace(/^https?:\/\//, "")}`;
+}
+
+function isLocalAppHost(host) {
+  return host === "localhost" || host.startsWith("localhost:") || host === "127.0.0.1" || host.startsWith("127.0.0.1:");
 }
 
 function render() {
