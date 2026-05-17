@@ -143,6 +143,7 @@
           </div>
           <div class="room-actions">
             <div id="roundBadge" class="round-badge">El 0</div>
+            <button id="inviteButton" type="button">Devet et</button>
             <button id="leaveRoomButton" type="button">Oyundan cix</button>
             <button id="startButton" class="primary">Baslat</button>
           </div>
@@ -165,6 +166,18 @@
         </div>
 
         <div id="hand" class="hand"></div>
+
+        <section class="chat-panel">
+          <div class="chat-head">
+            <p class="eyebrow">Masa sohbeti</p>
+            <span id="chatCount">0</span>
+          </div>
+          <div id="chatList" class="chat-list"></div>
+          <form id="chatForm" class="chat-form">
+            <input id="chatInput" maxlength="180" placeholder="Mesaj yaz..." autocomplete="off" />
+            <button id="chatSendButton" type="submit">Gonder</button>
+          </form>
+        </section>
 
         <section class="score-panel">
           <div class="score-head">

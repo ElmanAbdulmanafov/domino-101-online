@@ -241,7 +241,8 @@ function handleMessage(client, raw) {
       players: [{ id: client.id, playerId: client.playerId, name: client.name, username: client.username, avatar: client.avatar, score: 0, connected: true, bot: false }],
       game: null,
       hostId: client.id,
-      log: []
+      log: [],
+      chat: []
     };
 
     if (mode === "bot") {
@@ -358,6 +359,12 @@ function handleMessage(client, raw) {
     startRound(room);
     broadcastRoom(room);
     maybeRunBot(room);
+    return;
+  }
+
+  if (message.type === "sendChat") {
+    addChat(room, client, message.text);
+    broadcastRoom(room);
     return;
   }
 
@@ -1023,6 +1030,22 @@ function addLog(room, message) {
   persistLogToFirestore(room, entry, storedRoom);
 }
 
+function addChat(room, client, text) {
+  const cleanText = cleanChatText(text);
+  if (!cleanText) return;
+  room._lastActivity = Date.now();
+  room.chat = room.chat || [];
+  room.chat.push({
+    id: randomId(8),
+    at: new Date().toISOString(),
+    playerId: client.playerId,
+    clientId: client.id,
+    name: client.name,
+    text: cleanText
+  });
+  room.chat = room.chat.slice(-50);
+}
+
 function saveMatch(room, winner) {
   const finishedAt = new Date().toISOString();
   const match = {
@@ -1340,7 +1363,8 @@ function serializeRoom(room, viewerId) {
           message: game.message
         }
       : null,
-    log: room.log.slice(0, 50)
+    log: room.log.slice(0, 50),
+    chat: (room.chat || []).slice(-50)
   };
 }
 
@@ -1416,6 +1440,14 @@ function findClient(id) {
 function cleanName(name) {
   const text = String(name || "").trim().replace(/[<>"&]/g, "");
   return text ? text.slice(0, 18) : "Oyuncu";
+}
+
+function cleanChatText(text) {
+  return String(text || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[<>"&]/g, "")
+    .slice(0, 180);
 }
 
 function gameTitle(gameType) {

@@ -61,6 +61,7 @@ const els = {
   botTwoButton: document.querySelector("#botTwoButton"),
   botThreeButton: document.querySelector("#botThreeButton"),
   copyCodeButton: document.querySelector("#copyCodeButton"),
+  inviteButton: document.querySelector("#inviteButton"),
   roomMeta: document.querySelector("#roomMeta"),
   roundBadge: document.querySelector("#roundBadge"),
   leaveRoomButton: document.querySelector("#leaveRoomButton"),
@@ -74,6 +75,11 @@ const els = {
   hand: document.querySelector("#hand"),
   scoreTarget: document.querySelector("#scoreTarget"),
   scoreboard: document.querySelector("#scoreboard"),
+  chatCount: document.querySelector("#chatCount"),
+  chatList: document.querySelector("#chatList"),
+  chatForm: document.querySelector("#chatForm"),
+  chatInput: document.querySelector("#chatInput"),
+  chatSendButton: document.querySelector("#chatSendButton"),
   log: document.querySelector("#log"),
   error: document.querySelector("#error"),
   playLeftButton: document.querySelector("#playLeftButton"),
@@ -157,6 +163,14 @@ function bindControls() {
     if (!state.room?.code) return;
     await navigator.clipboard?.writeText(state.room.code);
     flash(`Kod kopyalandi: ${state.room.code}`);
+  });
+  els.inviteButton.addEventListener("click", inviteToRoom);
+  els.chatForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const text = els.chatInput.value.trim();
+    if (!text) return;
+    send({ type: "sendChat", text });
+    els.chatInput.value = "";
   });
 
   els.playLeftButton.addEventListener("click", () => playSelected("left"));
@@ -498,6 +512,7 @@ function render() {
 
   renderSeats(room, game);
   renderScoreboard(room, game);
+  renderChat(room);
 
   renderBoard(game);
   els.hand.innerHTML = game?.hand.map((tile) => {
@@ -517,6 +532,38 @@ function render() {
       updatePlayButtons();
     });
   }
+}
+
+async function inviteToRoom() {
+  if (!state.room?.code) return;
+  const url = "https://domino-101-online.onrender.com/";
+  const text = `Domino otağına qoşul: ${state.room.code}`;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: "Domino 101", text, url });
+      return;
+    }
+    await navigator.clipboard?.writeText(`${text}\n${url}`);
+    flash("Devet metni kopyalandi.");
+  } catch {
+    flash("Devet etmek mumkun olmadi.");
+  }
+}
+
+function renderChat(room) {
+  const messages = room.chat || [];
+  els.chatCount.textContent = String(messages.length);
+  if (!messages.length) {
+    els.chatList.innerHTML = '<div class="empty-room">Hele mesaj yoxdur</div>';
+    return;
+  }
+  els.chatList.innerHTML = messages.map((message) => `
+    <article class="chat-message ${message.clientId === state.clientId ? "me" : ""}">
+      <strong>${escapeHtml(message.name || "Oyuncu")}</strong>
+      <span>${escapeHtml(message.text)}</span>
+    </article>
+  `).join("");
+  els.chatList.scrollTop = els.chatList.scrollHeight;
 }
 
 function renderScoreboard(room, game) {
