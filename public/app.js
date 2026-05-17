@@ -6,6 +6,10 @@ const state = {
   profile: loadSavedProfile(),
   myHistory: { matches: [], rooms: [] },
   leaderboard: { byWins: [], byPoints: [], byGames: [] },
+  friendsState: { friends: [], incoming: [], outgoing: [] },
+  friendSearchResults: [],
+  activeFriendId: null,
+  directMessages: {},
   leaderMode: "wins",
   room: null,
   rooms: [],
@@ -46,6 +50,16 @@ const els = {
   leaderPointsButton: document.querySelector("#leaderPointsButton"),
   leaderGamesButton: document.querySelector("#leaderGamesButton"),
   leaderboardList: document.querySelector("#leaderboardList"),
+  refreshFriendsButton: document.querySelector("#refreshFriendsButton"),
+  friendSearchForm: document.querySelector("#friendSearchForm"),
+  friendSearchInput: document.querySelector("#friendSearchInput"),
+  friendSearchResults: document.querySelector("#friendSearchResults"),
+  friendRequests: document.querySelector("#friendRequests"),
+  friendList: document.querySelector("#friendList"),
+  directChatTitle: document.querySelector("#directChatTitle"),
+  directChatList: document.querySelector("#directChatList"),
+  directChatForm: document.querySelector("#directChatForm"),
+  directChatInput: document.querySelector("#directChatInput"),
   soundToggleButton: document.querySelector("#soundToggleButton"),
   logoutButton: document.querySelector("#logoutButton"),
   nameInput: document.querySelector("#nameInput"),
@@ -116,6 +130,10 @@ function bindControls() {
     localStorage.removeItem("domino101SessionToken");
     state.profile = null;
     state.myHistory = { matches: [], rooms: [], stats: null };
+    state.friendsState = { friends: [], incoming: [], outgoing: [] };
+    state.friendSearchResults = [];
+    state.activeFriendId = null;
+    state.directMessages = {};
     renderAuth();
   });
   els.avatarInput.addEventListener("change", () => readAvatar(els.avatarInput, els.avatarPreview));
@@ -156,6 +174,18 @@ function bindControls() {
   els.refreshRoomsButton.addEventListener("click", () => send({ type: "listRooms" }));
   els.refreshHistoryButton.addEventListener("click", () => send({ type: "getMyHistory" }));
   els.refreshLeaderboardButton.addEventListener("click", () => send({ type: "getLeaderboard" }));
+  els.refreshFriendsButton.addEventListener("click", () => send({ type: "getFriends" }));
+  els.friendSearchForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    send({ type: "searchPlayers", query: els.friendSearchInput.value.trim() });
+  });
+  els.directChatForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const text = els.directChatInput.value.trim();
+    if (!text || !state.activeFriendId) return;
+    send({ type: "sendDirectMessage", friendId: state.activeFriendId, text });
+    els.directChatInput.value = "";
+  });
   els.leaderWinsButton.addEventListener("click", () => setLeaderMode("wins"));
   els.leaderPointsButton.addEventListener("click", () => setLeaderMode("points"));
   els.leaderGamesButton.addEventListener("click", () => setLeaderMode("games"));
@@ -230,6 +260,7 @@ function connect() {
       els.authError.textContent = "";
       renderAuth();
       send({ type: "getMyHistory" });
+      send({ type: "getFriends" });
     }
     if (message.type === "authError") {
       els.authError.textContent = message.message;
@@ -255,6 +286,22 @@ function connect() {
     if (message.type === "leaderboard") {
       state.leaderboard = message.leaderboard || { byWins: [], byPoints: [], byGames: [] };
       renderLeaderboard();
+    }
+    if (message.type === "friendsState") {
+      state.friendsState = message.friendsState || { friends: [], incoming: [], outgoing: [] };
+      if (state.activeFriendId && !state.friendsState.friends.some((friend) => friend.id === state.activeFriendId)) {
+        state.activeFriendId = null;
+      }
+      renderFriends();
+    }
+    if (message.type === "friendSearchResults") {
+      state.friendSearchResults = message.results || [];
+      renderFriendSearchResults();
+    }
+    if (message.type === "directMessages") {
+      const friendId = message.friendId || state.activeFriendId;
+      if (friendId) state.directMessages[friendId] = message.messages || [];
+      renderDirectChat();
     }
     if (message.type === "leftRoom") {
       playSound("leave");
@@ -320,6 +367,7 @@ function renderSetup() {
   els.createRoomButton.textContent = state.mode === "bot" ? "Botla basla" : "Otaq yarat";
   renderProfileHistory();
   renderLeaderboard();
+  renderFriends();
 }
 
 function updateSoundButton() {
@@ -435,6 +483,138 @@ function renderLeaderboard() {
       </article>
     `;
   }).join("");
+}
+
+function renderFriends() {
+  renderFriendSearchResults();
+  renderFriendRequests();
+  renderFriendList();
+  renderDirectChat();
+}
+
+function renderFriendSearchResults() {
+  if (!els.friendSearchResults) return;
+  const results = state.friendSearchResults || [];
+  if (!results.length) {
+    els.friendSearchResults.innerHTML = "";
+    return;
+  }
+
+  els.friendSearchResults.innerHTML = results.map((player) => `
+    <article class="friend-row">
+      ${avatarMarkup(player, "tiny")}
+      <span>
+        <strong>${escapeHtml(player.name || "Oyuncu")}</strong>
+        <small>@${escapeHtml(player.username || "player")} · ${relationText(player.relation)}</small>
+      </span>
+      ${player.relation === "none"
+        ? `<button type="button" data-friend-action="request" data-player-id="${escapeHtml(player.id)}">Dostluq</button>`
+        : ""}
+    </article>
+  `).join("");
+
+  for (const button of els.friendSearchResults.querySelectorAll("[data-friend-action='request']")) {
+    button.addEventListener("click", () => {
+      send({ type: "sendFriendRequest", targetPlayerId: button.dataset.playerId });
+    });
+  }
+}
+
+function renderFriendRequests() {
+  if (!els.friendRequests) return;
+  const incoming = state.friendsState?.incoming || [];
+  const outgoing = state.friendsState?.outgoing || [];
+  const incomingHtml = incoming.map((request) => `
+    <article class="friend-row request">
+      ${avatarMarkup(request.player, "tiny")}
+      <span>
+        <strong>${escapeHtml(request.player?.name || "Oyuncu")}</strong>
+        <small>Dostluq teklifi gonderib</small>
+      </span>
+      <button type="button" data-request-id="${escapeHtml(request.id)}" data-accept="1">Qebul</button>
+      <button type="button" data-request-id="${escapeHtml(request.id)}" data-accept="0">Imtina</button>
+    </article>
+  `).join("");
+  const outgoingHtml = outgoing.map((request) => `
+    <article class="friend-row muted">
+      ${avatarMarkup(request.player, "tiny")}
+      <span>
+        <strong>${escapeHtml(request.player?.name || "Oyuncu")}</strong>
+        <small>Teklif gozleyir</small>
+      </span>
+    </article>
+  `).join("");
+
+  els.friendRequests.innerHTML = incomingHtml + outgoingHtml;
+  for (const button of els.friendRequests.querySelectorAll("[data-request-id]")) {
+    button.addEventListener("click", () => {
+      send({
+        type: "respondFriendRequest",
+        requestId: button.dataset.requestId,
+        accept: button.dataset.accept === "1"
+      });
+    });
+  }
+}
+
+function renderFriendList() {
+  if (!els.friendList) return;
+  const friends = state.friendsState?.friends || [];
+  if (!friends.length) {
+    els.friendList.innerHTML = '<div class="empty-room">Hele dost yoxdur</div>';
+    return;
+  }
+
+  els.friendList.innerHTML = friends.map((friend) => `
+    <button class="friend-tab ${friend.id === state.activeFriendId ? "active" : ""}" type="button" data-friend-id="${escapeHtml(friend.id)}">
+      ${avatarMarkup(friend, "tiny")}
+      <span>
+        <strong>${escapeHtml(friend.name || "Oyuncu")}</strong>
+        <small>@${escapeHtml(friend.username || "player")}</small>
+      </span>
+    </button>
+  `).join("");
+
+  for (const button of els.friendList.querySelectorAll("[data-friend-id]")) {
+    button.addEventListener("click", () => {
+      state.activeFriendId = button.dataset.friendId;
+      send({ type: "getDirectMessages", friendId: state.activeFriendId });
+      renderFriends();
+    });
+  }
+}
+
+function renderDirectChat() {
+  if (!els.directChatList) return;
+  const friend = (state.friendsState?.friends || []).find((item) => item.id === state.activeFriendId);
+  els.directChatTitle.textContent = friend ? `${friend.name} ile yazisma` : "Dost sec";
+  els.directChatInput.disabled = !friend;
+  els.directChatForm.querySelector("button").disabled = !friend;
+  if (!friend) {
+    els.directChatList.innerHTML = '<div class="empty-room">Yazisma ucun dost sec</div>';
+    return;
+  }
+
+  const messages = state.directMessages[state.activeFriendId] || [];
+  if (!messages.length) {
+    els.directChatList.innerHTML = '<div class="empty-room">Hele mesaj yoxdur</div>';
+    return;
+  }
+
+  els.directChatList.innerHTML = messages.map((message) => `
+    <article class="direct-message ${message.fromPlayerId === state.profile?.id ? "me" : ""}">
+      <strong>${message.fromPlayerId === state.profile?.id ? "Sen" : escapeHtml(friend.name || "Dost")}</strong>
+      <span>${escapeHtml(message.text)}</span>
+    </article>
+  `).join("");
+  els.directChatList.scrollTop = els.directChatList.scrollHeight;
+}
+
+function relationText(relation) {
+  if (relation === "friend") return "Dost";
+  if (relation === "outgoing") return "Teklif gonderilib";
+  if (relation === "incoming") return "Teklif var";
+  return "Dost deyil";
 }
 
 function requireProfile() {

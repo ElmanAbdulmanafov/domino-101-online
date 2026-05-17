@@ -341,7 +341,8 @@ h1 {
 
 .lobby,
 .profile-history,
-.leaderboard-panel {
+.leaderboard-panel,
+.friends-panel {
   display: grid;
   gap: 10px;
   border-radius: 8px;
@@ -447,6 +448,128 @@ h1 {
   font-style: normal;
   font-weight: 1000;
   white-space: nowrap;
+}
+
+.friend-search,
+.direct-chat-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.friend-results,
+.friend-requests,
+.friend-list,
+.direct-chat-list {
+  display: grid;
+  gap: 7px;
+}
+
+.friend-row,
+.friend-tab {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px;
+  color: #fff8ea;
+  background: rgba(10, 16, 18, 0.34);
+  text-align: left;
+}
+
+.friend-row.request {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
+.friend-row.muted {
+  opacity: 0.72;
+}
+
+.friend-tab {
+  width: 100%;
+  cursor: pointer;
+}
+
+.friend-tab.active {
+  background: rgba(241, 188, 91, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(241, 188, 91, 0.42);
+}
+
+.friend-row span,
+.friend-tab span {
+  min-width: 0;
+}
+
+.friend-row strong,
+.friend-row small,
+.friend-tab strong,
+.friend-tab small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friend-row small,
+.friend-tab small {
+  color: rgba(246, 241, 231, 0.62);
+}
+
+.friend-chat-wrap {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.8fr) minmax(0, 1.4fr);
+  gap: 10px;
+}
+
+.direct-chat {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.direct-chat-title {
+  color: #f1bc5b;
+  font-size: 0.82rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.direct-chat-list {
+  align-content: start;
+  min-height: 170px;
+  max-height: 260px;
+  overflow: auto;
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(3, 9, 10, 0.28);
+}
+
+.direct-message {
+  max-width: 84%;
+  border-radius: 8px;
+  padding: 7px 9px;
+  background: rgba(246, 241, 231, 0.08);
+}
+
+.direct-message.me {
+  justify-self: end;
+  background: rgba(241, 188, 91, 0.18);
+}
+
+.direct-message strong,
+.direct-message span {
+  display: block;
+}
+
+.direct-message strong {
+  color: #f1bc5b;
+  font-size: 0.72rem;
+}
+
+.direct-message span {
+  overflow-wrap: anywhere;
 }
 
 .stats-grid {
@@ -1036,9 +1159,26 @@ h1 {
     gap: 4px;
   }
 
-  .leaderboard-panel {
+  .leaderboard-panel,
+  .friends-panel {
     gap: 8px;
     padding: 10px;
+  }
+
+  .friend-chat-wrap,
+  .friend-search,
+  .direct-chat-form {
+    grid-template-columns: 1fr;
+  }
+
+  .friend-row,
+  .friend-row.request {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .friend-row button {
+    grid-column: 2;
+    min-height: 32px;
   }
 
   .leaderboard-list {

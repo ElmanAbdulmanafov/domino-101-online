@@ -145,6 +145,30 @@
           <div id="leaderboardList" class="leaderboard-list"></div>
         </div>
 
+        <div class="friends-panel">
+          <div class="lobby-head">
+            <p class="eyebrow">Dostlar</p>
+            <button id="refreshFriendsButton" type="button">Yenile</button>
+          </div>
+          <form id="friendSearchForm" class="friend-search">
+            <input id="friendSearchInput" maxlength="32" placeholder="Ad ve ya username axtar" autocomplete="off" />
+            <button type="submit">Axtar</button>
+          </form>
+          <div id="friendSearchResults" class="friend-results"></div>
+          <div id="friendRequests" class="friend-requests"></div>
+          <div class="friend-chat-wrap">
+            <div id="friendList" class="friend-list"></div>
+            <div class="direct-chat">
+              <div id="directChatTitle" class="direct-chat-title">Dost sec</div>
+              <div id="directChatList" class="direct-chat-list"></div>
+              <form id="directChatForm" class="direct-chat-form">
+                <input id="directChatInput" maxlength="180" placeholder="Mesaj yaz..." autocomplete="off" />
+                <button type="submit">Gonder</button>
+              </form>
+            </div>
+          </div>
+        </div>
+
         <p id="error" class="error"></p>
       </section>
 

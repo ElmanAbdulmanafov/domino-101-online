@@ -172,6 +172,77 @@ function handleMessage(client, raw) {
     return;
   }
 
+  if (message.type === "getFriends") {
+    if (!client.playerId) {
+      send(client, { type: "authError", message: "Evvelce hesaba gir." });
+      return;
+    }
+    send(client, { type: "friendsState", friendsState: getFriendsState(client.playerId) });
+    return;
+  }
+
+  if (message.type === "searchPlayers") {
+    if (!client.playerId) {
+      send(client, { type: "authError", message: "Evvelce hesaba gir." });
+      return;
+    }
+    send(client, { type: "friendSearchResults", results: searchPlayers(client.playerId, message.query) });
+    return;
+  }
+
+  if (message.type === "sendFriendRequest") {
+    if (!client.playerId) {
+      send(client, { type: "authError", message: "Evvelce hesaba gir." });
+      return;
+    }
+    const result = sendFriendRequest(client.playerId, message.targetPlayerId);
+    if (result.error) send(client, { type: "error", message: result.error });
+    notifyFriendState(client.playerId);
+    if (result.targetPlayerId) notifyFriendState(result.targetPlayerId);
+    return;
+  }
+
+  if (message.type === "respondFriendRequest") {
+    if (!client.playerId) {
+      send(client, { type: "authError", message: "Evvelce hesaba gir." });
+      return;
+    }
+    const result = respondFriendRequest(client.playerId, message.requestId, Boolean(message.accept));
+    if (result.error) send(client, { type: "error", message: result.error });
+    notifyFriendState(client.playerId);
+    if (result.fromPlayerId) notifyFriendState(result.fromPlayerId);
+    return;
+  }
+
+  if (message.type === "getDirectMessages") {
+    if (!client.playerId) {
+      send(client, { type: "authError", message: "Evvelce hesaba gir." });
+      return;
+    }
+    send(client, {
+      type: "directMessages",
+      friendId: String(message.friendId || ""),
+      messages: getDirectMessages(client.playerId, message.friendId)
+    });
+    return;
+  }
+
+  if (message.type === "sendDirectMessage") {
+    if (!client.playerId) {
+      send(client, { type: "authError", message: "Evvelce hesaba gir." });
+      return;
+    }
+    const result = addDirectMessage(client.playerId, message.friendId, message.text);
+    if (result.error) {
+      send(client, { type: "error", message: result.error });
+      return;
+    }
+    notifyDirectMessages(client.playerId, result.friendId);
+    notifyFriendState(client.playerId);
+    notifyFriendState(result.friendId);
+    return;
+  }
+
   if (message.type === "resumeSession") {
     const profile = resumeSession(message.token);
     if (!profile) {
@@ -180,6 +251,7 @@ function handleMessage(client, raw) {
     }
     setClientProfile(client, profile);
     send(client, { type: "playerProfile", profile });
+    send(client, { type: "friendsState", friendsState: getFriendsState(client.playerId) });
     return;
   }
 
@@ -191,6 +263,7 @@ function handleMessage(client, raw) {
     }
     setClientProfile(client, result.profile);
     send(client, { type: "playerProfile", profile: result.profile, sessionToken: result.sessionToken });
+    send(client, { type: "friendsState", friendsState: getFriendsState(client.playerId) });
     return;
   }
 
@@ -202,6 +275,7 @@ function handleMessage(client, raw) {
     }
     setClientProfile(client, result.profile);
     send(client, { type: "playerProfile", profile: result.profile, sessionToken: result.sessionToken });
+    send(client, { type: "friendsState", friendsState: getFriendsState(client.playerId) });
     return;
   }
 
@@ -217,6 +291,7 @@ function handleMessage(client, raw) {
     }
     setClientProfile(client, result.profile);
     send(client, { type: "playerProfile", profile: result.profile });
+    notifyFriendState(client.playerId);
     return;
   }
 
@@ -715,6 +790,7 @@ function createAccount(rawProfile = {}) {
     passwordSalt: salt,
     passwordHash: passwordHash(password, salt),
     sessionHash: tokenHash(sessionToken),
+    friends: [],
     createdAt: now,
     updatedAt: now
   };
@@ -865,6 +941,173 @@ function getLeaderboard() {
   };
 }
 
+function getFriendsState(playerId) {
+  const account = historyDb.players?.[playerId];
+  if (!account) return { friends: [], incoming: [], outgoing: [] };
+  const friends = (account.friends || [])
+    .map((friendId) => publicProfile(historyDb.players?.[friendId]))
+    .filter((profile) => profile.id);
+  const requests = historyDb.friendRequests || [];
+  return {
+    friends,
+    incoming: requests
+      .filter((request) => request.toPlayerId === playerId && request.status === "pending")
+      .map((request) => friendRequestView(request, request.fromPlayerId)),
+    outgoing: requests
+      .filter((request) => request.fromPlayerId === playerId && request.status === "pending")
+      .map((request) => friendRequestView(request, request.toPlayerId))
+  };
+}
+
+function friendRequestView(request, otherPlayerId) {
+  return {
+    id: request.id,
+    status: request.status,
+    createdAt: request.createdAt,
+    player: publicProfile(historyDb.players?.[otherPlayerId])
+  };
+}
+
+function searchPlayers(viewerId, query) {
+  const cleanQuery = String(query || "").trim().toLowerCase();
+  if (cleanQuery.length < 2) return [];
+  return Object.values(historyDb.players || {})
+    .filter((player) => player.id && player.id !== viewerId && !player.bot)
+    .filter((player) => {
+      const haystack = `${player.name || ""} ${player.username || ""}`.toLowerCase();
+      return haystack.includes(cleanQuery);
+    })
+    .slice(0, 12)
+    .map((player) => ({
+      ...publicProfile(player),
+      relation: friendRelation(viewerId, player.id)
+    }));
+}
+
+function friendRelation(playerId, otherPlayerId) {
+  const account = historyDb.players?.[playerId];
+  if ((account?.friends || []).includes(otherPlayerId)) return "friend";
+  const request = (historyDb.friendRequests || []).find((item) =>
+    item.status === "pending"
+    && ((item.fromPlayerId === playerId && item.toPlayerId === otherPlayerId)
+      || (item.fromPlayerId === otherPlayerId && item.toPlayerId === playerId))
+  );
+  if (!request) return "none";
+  return request.fromPlayerId === playerId ? "outgoing" : "incoming";
+}
+
+function sendFriendRequest(fromPlayerId, targetPlayerId) {
+  const targetId = String(targetPlayerId || "");
+  const from = historyDb.players?.[fromPlayerId];
+  const target = historyDb.players?.[targetId];
+  if (!from || !target) return { error: "Oyuncu tapilmadi." };
+  if (fromPlayerId === targetId) return { error: "Ozune dostluq gondere bilmezsen." };
+  if ((from.friends || []).includes(targetId)) return { error: "Bu oyuncu artiq dostundur.", targetPlayerId: targetId };
+  const existing = (historyDb.friendRequests || []).find((request) =>
+    request.status === "pending"
+    && ((request.fromPlayerId === fromPlayerId && request.toPlayerId === targetId)
+      || (request.fromPlayerId === targetId && request.toPlayerId === fromPlayerId))
+  );
+  if (existing) return { error: "Dostluq teklifi artiq var.", targetPlayerId: targetId };
+
+  const request = {
+    id: `friend-${randomId(10)}`,
+    fromPlayerId,
+    toPlayerId: targetId,
+    status: "pending",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  historyDb.friendRequests = historyDb.friendRequests || [];
+  historyDb.friendRequests.unshift(request);
+  saveHistoryDb();
+  persistFriendRequestToFirestore(request);
+  return { request, targetPlayerId: targetId };
+}
+
+function respondFriendRequest(playerId, requestId, accept) {
+  const request = (historyDb.friendRequests || []).find((item) => item.id === String(requestId || ""));
+  if (!request || request.toPlayerId !== playerId || request.status !== "pending") {
+    return { error: "Dostluq teklifi tapilmadi." };
+  }
+  request.status = accept ? "accepted" : "declined";
+  request.updatedAt = new Date().toISOString();
+  if (accept) {
+    addFriendLink(request.fromPlayerId, request.toPlayerId);
+    addFriendLink(request.toPlayerId, request.fromPlayerId);
+  }
+  saveHistoryDb();
+  persistFriendRequestToFirestore(request);
+  persistAccountToFirestore(historyDb.players?.[request.fromPlayerId]);
+  persistAccountToFirestore(historyDb.players?.[request.toPlayerId]);
+  return { request, fromPlayerId: request.fromPlayerId };
+}
+
+function addFriendLink(playerId, friendId) {
+  const account = historyDb.players?.[playerId];
+  if (!account) return;
+  account.friends = Array.from(new Set([...(account.friends || []), friendId]));
+  account.updatedAt = new Date().toISOString();
+}
+
+function areFriends(playerId, friendId) {
+  return Boolean(historyDb.players?.[playerId]?.friends?.includes(friendId));
+}
+
+function conversationIdFor(playerId, friendId) {
+  return [String(playerId || ""), String(friendId || "")].sort().join("__");
+}
+
+function getDirectMessages(playerId, friendId) {
+  const cleanFriendId = String(friendId || "");
+  if (!areFriends(playerId, cleanFriendId)) return [];
+  const conversationId = conversationIdFor(playerId, cleanFriendId);
+  return (historyDb.directMessages || [])
+    .filter((message) => message.conversationId === conversationId)
+    .sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")))
+    .slice(-80);
+}
+
+function addDirectMessage(fromPlayerId, friendId, text) {
+  const cleanFriendId = String(friendId || "");
+  if (!areFriends(fromPlayerId, cleanFriendId)) return { error: "Mesaj ucun evvelce dostluq lazimdir." };
+  const cleanText = cleanChatText(text);
+  if (!cleanText) return { error: "Mesaj bosdur." };
+  const message = {
+    id: `dm-${randomId(10)}`,
+    conversationId: conversationIdFor(fromPlayerId, cleanFriendId),
+    fromPlayerId,
+    toPlayerId: cleanFriendId,
+    text: cleanText,
+    createdAt: new Date().toISOString()
+  };
+  historyDb.directMessages = historyDb.directMessages || [];
+  historyDb.directMessages.push(message);
+  historyDb.directMessages = historyDb.directMessages.slice(-3000);
+  saveHistoryDb();
+  persistDirectMessageToFirestore(message);
+  return { message, friendId: cleanFriendId };
+}
+
+function notifyFriendState(playerId) {
+  for (const client of sockets) {
+    if (client.playerId === playerId) {
+      send(client, { type: "friendsState", friendsState: getFriendsState(playerId) });
+    }
+  }
+}
+
+function notifyDirectMessages(playerA, playerB) {
+  for (const client of sockets) {
+    if (client.playerId === playerA) {
+      send(client, { type: "directMessages", friendId: playerB, messages: getDirectMessages(playerA, playerB) });
+    }
+    if (client.playerId === playerB) {
+      send(client, { type: "directMessages", friendId: playerA, messages: getDirectMessages(playerB, playerA) });
+    }
+  }
+}
+
 function defaultStats() {
   return { games: 0, wins: 0, winRate: 0, points: 0, bestScore: 0, games101: 0, phoneGames: 0, lastPlayedAt: null };
 }
@@ -920,10 +1163,12 @@ function loadHistoryDb() {
       version: 1,
       rooms: parsed.rooms || {},
       players: parsed.players || {},
-      matches: Array.isArray(parsed.matches) ? parsed.matches : []
+      matches: Array.isArray(parsed.matches) ? parsed.matches : [],
+      friendRequests: Array.isArray(parsed.friendRequests) ? parsed.friendRequests : [],
+      directMessages: Array.isArray(parsed.directMessages) ? parsed.directMessages : []
     };
   } catch {
-    return { version: 1, rooms: {}, players: {}, matches: [] };
+    return { version: 1, rooms: {}, players: {}, matches: [], friendRequests: [], directMessages: [] };
   }
 }
 
@@ -982,9 +1227,11 @@ function loadFirebaseServiceAccount() {
 
 async function hydrateHistoryFromFirestore() {
   try {
-    const [accountSnapshot, matchSnapshot] = await Promise.all([
+    const [accountSnapshot, matchSnapshot, requestSnapshot, messageSnapshot] = await Promise.all([
       firestore.collection("accounts").get(),
-      firestore.collection("matches").limit(1000).get()
+      firestore.collection("matches").limit(1000).get(),
+      firestore.collection("friendRequests").limit(1000).get(),
+      firestore.collection("directMessages").limit(3000).get()
     ]);
 
     historyDb.players = historyDb.players || {};
@@ -1001,6 +1248,26 @@ async function hydrateHistoryFromFirestore() {
       historyDb.matches = [...byKey.values()]
         .sort((a, b) => String(b.finishedAt || "").localeCompare(String(a.finishedAt || "")))
         .slice(0, 1000);
+    }
+
+    const firestoreRequests = [];
+    requestSnapshot.forEach((doc) => firestoreRequests.push(doc.data()));
+    if (firestoreRequests.length) {
+      const byId = new Map((historyDb.friendRequests || []).map((request) => [request.id, request]));
+      for (const request of firestoreRequests) if (request?.id) byId.set(request.id, request);
+      historyDb.friendRequests = [...byId.values()]
+        .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+        .slice(0, 1000);
+    }
+
+    const firestoreMessages = [];
+    messageSnapshot.forEach((doc) => firestoreMessages.push(doc.data()));
+    if (firestoreMessages.length) {
+      const byId = new Map((historyDb.directMessages || []).map((message) => [message.id, message]));
+      for (const message of firestoreMessages) if (message?.id) byId.set(message.id, message);
+      historyDb.directMessages = [...byId.values()]
+        .sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")))
+        .slice(-3000);
     }
 
     saveHistoryDb();
@@ -1181,11 +1448,34 @@ function persistAccountToFirestore(account) {
     passwordSalt: account.passwordSalt || "",
     passwordHash: account.passwordHash || "",
     sessionHash: account.sessionHash || "",
+    friends: Array.isArray(account.friends) ? account.friends : [],
     createdAt: account.createdAt || null,
     updatedAt: account.updatedAt || null,
     savedAt: FieldValue.serverTimestamp()
   }, { merge: true }).catch((error) => {
     console.warn(`Firestore account write failed: ${error.message}`);
+  });
+}
+
+function persistFriendRequestToFirestore(request) {
+  if (!firestore || !request?.id) return;
+
+  firestore.collection("friendRequests").doc(request.id).set({
+    ...request,
+    savedAt: FieldValue.serverTimestamp()
+  }, { merge: true }).catch((error) => {
+    console.warn(`Firestore friend request write failed: ${error.message}`);
+  });
+}
+
+function persistDirectMessageToFirestore(message) {
+  if (!firestore || !message?.id) return;
+
+  firestore.collection("directMessages").doc(message.id).set({
+    ...message,
+    savedAt: FieldValue.serverTimestamp()
+  }, { merge: true }).catch((error) => {
+    console.warn(`Firestore direct message write failed: ${error.message}`);
   });
 }
 
