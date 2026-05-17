@@ -77,15 +77,31 @@ server.on("upgrade", (req, socket) => {
     socket,
     name: "Oyuncu",
     playerId: null,
-    roomCode: null
+    roomCode: null,
+    recvBuffer: Buffer.alloc(0),
+    alive: true
   };
 
   sockets.add(client);
   send(client, { type: "connected", clientId: client.id });
   send(client, { type: "roomList", rooms: listOpenRooms() });
 
-  socket.on("data", (buffer) => {
-    for (const message of decodeFrames(buffer)) {
+  socket.on("data", (chunk) => {
+    client.recvBuffer = Buffer.concat([client.recvBuffer, chunk]);
+    if (client.recvBuffer.length > 524288) {
+      client.recvBuffer = Buffer.alloc(0);
+      socket.destroy();
+      return;
+    }
+    const { messages, consumed, close, pong } = decodeFrames(client.recvBuffer);
+    if (consumed > 0) client.recvBuffer = client.recvBuffer.subarray(consumed);
+    if (pong) client.alive = true;
+    if (close) {
+      if (!socket.destroyed) socket.write(Buffer.from([0x88, 0]));
+      disconnect(client);
+      return;
+    }
+    for (const message of messages) {
       handleMessage(client, message);
     }
   });
@@ -97,6 +113,32 @@ server.on("upgrade", (req, socket) => {
 server.listen(PORT, HOST, () => {
   console.log(`Domino server: http://${HOST}:${PORT}`);
 });
+
+setInterval(() => {
+  for (const client of sockets) {
+    if (!client.alive) {
+      client.socket.destroy();
+      disconnect(client);
+      continue;
+    }
+    client.alive = false;
+    if (!client.socket.destroyed) {
+      client.socket.write(Buffer.from([0x89, 0]));
+    }
+  }
+}, 25000);
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, room] of rooms) {
+    if (room.players.every((p) => !p.connected || p.bot)) {
+      if (!room._lastActivity || now - room._lastActivity > 30 * 60 * 1000) {
+        rooms.delete(code);
+      }
+    }
+  }
+  broadcastLobby();
+}, 5 * 60 * 1000);
 
 function handleMessage(client, raw) {
   let message;
@@ -906,12 +948,26 @@ function matchKey(match) {
   return `${match.roomCode || "room"}:${match.finishedAt || ""}:${match.winner?.playerId || match.winner?.id || ""}`;
 }
 
+let _saveTimer = null;
 function saveHistoryDb() {
-  mkdirSync(DATA_DIR, { recursive: true });
-  writeFileSync(HISTORY_FILE, JSON.stringify(historyDb, null, 2));
+  if (_saveTimer) return;
+  _saveTimer = setTimeout(() => {
+    _saveTimer = null;
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(HISTORY_FILE, JSON.stringify(historyDb, null, 2));
+  }, 2000);
 }
 
+process.on("exit", () => {
+  if (_saveTimer) {
+    clearTimeout(_saveTimer);
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(HISTORY_FILE, JSON.stringify(historyDb, null, 2));
+  }
+});
+
 function addLog(room, message) {
+  room._lastActivity = Date.now();
   const entry = {
     at: new Date().toISOString(),
     roundNumber: room.roundNumber || 0,
@@ -1160,11 +1216,20 @@ function findBotMove(game, hand) {
     return tile ? { tile, side: "right" } : null;
   }
 
+  const moves = [];
   for (const tile of hand) {
-    if (normalizeMove(game, tile, "left")) return { tile, side: "left" };
-    if (normalizeMove(game, tile, "right")) return { tile, side: "right" };
+    if (normalizeMove(game, tile, "left")) moves.push({ tile, side: "left" });
+    if (normalizeMove(game, tile, "right")) moves.push({ tile, side: "right" });
   }
-  return null;
+  if (!moves.length) return null;
+
+  moves.sort((a, b) => {
+    const aDouble = a.tile.a === a.tile.b ? 1 : 0;
+    const bDouble = b.tile.a === b.tile.b ? 1 : 0;
+    if (aDouble !== bDouble) return bDouble - aDouble;
+    return (b.tile.a + b.tile.b) - (a.tile.a + a.tile.b);
+  });
+  return moves[0];
 }
 
 function createDeck() {
@@ -1265,31 +1330,47 @@ function serializeRoom(room, viewerId) {
 function send(client, payload) {
   if (!client?.socket || client.socket.destroyed) return;
   const data = Buffer.from(JSON.stringify(payload));
-  const header = data.length < 126
-    ? Buffer.from([0x81, data.length])
-    : Buffer.from([0x81, 126, data.length >> 8, data.length & 255]);
+  let header;
+  if (data.length < 126) {
+    header = Buffer.from([0x81, data.length]);
+  } else if (data.length <= 65535) {
+    header = Buffer.from([0x81, 126, data.length >> 8, data.length & 255]);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x81;
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(data.length), 2);
+  }
   client.socket.write(Buffer.concat([header, data]));
 }
 
 function decodeFrames(buffer) {
   const messages = [];
   let offset = 0;
+  let close = false;
+  let pong = false;
 
   while (offset + 2 <= buffer.length) {
+    const frameStart = offset;
     const opcode = buffer[offset] & 0x0f;
     let length = buffer[offset + 1] & 0x7f;
     const masked = Boolean(buffer[offset + 1] & 0x80);
     offset += 2;
 
     if (length === 126) {
-      if (offset + 2 > buffer.length) break;
+      if (offset + 2 > buffer.length) { offset = frameStart; break; }
       length = buffer.readUInt16BE(offset);
       offset += 2;
     } else if (length === 127) {
-      if (offset + 8 > buffer.length) break;
+      if (offset + 8 > buffer.length) { offset = frameStart; break; }
       length = Number(buffer.readBigUInt64BE(offset));
       offset += 8;
     }
+
+    const maskSize = masked ? 4 : 0;
+    if (offset + maskSize + length > buffer.length) { offset = frameStart; break; }
+
+    if (length > 524288) { offset += maskSize + length; continue; }
 
     const mask = masked ? buffer.subarray(offset, offset + 4) : null;
     if (masked) offset += 4;
@@ -1297,7 +1378,8 @@ function decodeFrames(buffer) {
     const payload = buffer.subarray(offset, offset + length);
     offset += length;
 
-    if (opcode === 0x8) break;
+    if (opcode === 0x8) { close = true; break; }
+    if (opcode === 0xa) { pong = true; continue; }
     if (opcode !== 0x1) continue;
 
     const decoded = Buffer.alloc(payload.length);
@@ -1307,7 +1389,7 @@ function decodeFrames(buffer) {
     messages.push(decoded.toString("utf8"));
   }
 
-  return messages;
+  return { messages, consumed: offset, close, pong };
 }
 
 function findClient(id) {
@@ -1315,7 +1397,7 @@ function findClient(id) {
 }
 
 function cleanName(name) {
-  const text = String(name || "").trim();
+  const text = String(name || "").trim().replace(/[<>"&]/g, "");
   return text ? text.slice(0, 18) : "Oyuncu";
 }
 

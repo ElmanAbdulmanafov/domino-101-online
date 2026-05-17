@@ -226,6 +226,7 @@ function connect() {
       playSound("leave");
       state.room = null;
       state.selectedTileId = null;
+      document.body.classList.remove("in-room");
       renderSetup();
       els.room.classList.add("hidden");
       send({ type: "getMyHistory" });
@@ -480,6 +481,7 @@ function render() {
   els.auth.classList.toggle("hidden", Boolean(state.profile));
   els.setup.classList.toggle("hidden", Boolean(room) || !state.profile);
   els.room.classList.toggle("hidden", !room);
+  document.body.classList.toggle("in-room", Boolean(room));
   if (!room) return;
 
   const game = room.game;

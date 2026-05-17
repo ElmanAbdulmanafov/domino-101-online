@@ -149,14 +149,13 @@ h1 {
 
 .setup,
 .room {
-  margin-top: 18px;
+  margin-top: 10px;
 }
 
 .setup {
   display: grid;
   gap: 14px;
   max-width: 520px;
-  min-height: calc(100vh - 118px);
   align-content: center;
 }
 
@@ -513,7 +512,7 @@ h1 {
   position: relative;
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas: "board";
-  min-height: clamp(420px, 58vh, 620px);
+  min-height: clamp(360px, 50vh, 580px);
   padding: 78px 132px 90px;
   align-items: center;
   isolation: isolate;
@@ -792,62 +791,117 @@ h1 {
 
 @media (max-width: 720px) {
   :root {
-    --board-gap: 4px;
+    --board-gap: 3px;
   }
 
   .app {
     min-height: 100svh;
-    padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom));
+    padding: max(6px, env(safe-area-inset-top)) 6px max(6px, env(safe-area-inset-bottom));
   }
 
   .topbar {
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+  }
+
+  .room ~ .topbar,
+  .room:not(.hidden) ~ .topbar {
+    display: none;
+  }
+
+  body.in-room .topbar {
+    display: none;
+  }
+
+  body.in-room .room {
+    margin-top: 4px;
   }
 
   .brand-mark {
-    width: 42px;
-    height: 42px;
+    width: 36px;
+    height: 36px;
+    font-size: 0.85rem;
   }
 
   h1 {
-    font-size: 2rem;
+    font-size: 1.6rem;
+  }
+
+  .room:not(.hidden) {
+    margin-top: 4px;
+  }
+
+  .connection {
+    min-width: 62px;
+    padding: 5px 8px;
+    font-size: 0.72rem;
+  }
+
+  .setup {
+    min-height: auto;
+    gap: 10px;
   }
 
   .room-head {
-    align-items: flex-end;
-    gap: 8px;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 2px;
   }
 
   .profile-bar {
     flex-wrap: wrap;
+    padding: 8px;
+    gap: 8px;
   }
 
   .profile-bar > div {
     flex: 1 1 calc(100% - 70px);
   }
 
+  .profile-bar button {
+    min-height: 32px;
+    padding: 0 8px;
+    font-size: 0.76rem;
+  }
+
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .stats-grid div {
+    padding: 6px 8px;
+  }
+
+  .stats-grid strong {
+    font-size: 0.95rem;
   }
 
   .room-actions {
     grid-auto-flow: column;
     align-items: center;
+    gap: 4px;
   }
 
   .room-actions button,
-  .round-badge,
+  .round-badge {
+    min-height: 32px;
+    padding: 0 8px;
+    font-size: 0.74rem;
+  }
+
   .code {
-    min-height: 38px;
-    padding: 0 10px;
-    font-size: 0.82rem;
+    min-width: 90px;
+    min-height: 32px;
+    padding: 0 8px;
+    font-size: 1rem;
   }
 
   .message {
-    min-height: 22px;
-    margin: 8px 0;
-    font-size: 0.88rem;
+    min-height: 18px;
+    margin: 4px 0;
+    font-size: 0.8rem;
+    line-height: 1.2;
   }
 
   .table-area {
@@ -858,8 +912,8 @@ h1 {
       "board board"
       "bottom bottom";
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-rows: auto auto minmax(380px, 58svh) auto;
-    gap: 6px;
+    grid-template-rows: auto auto minmax(180px, 34svh) auto;
+    gap: 4px;
     min-height: auto;
     padding: 0;
     align-items: stretch;
@@ -875,111 +929,166 @@ h1 {
     min-width: 0;
   }
 
-  .seat-top {
-    grid-area: top;
+  .seat-top { grid-area: top; }
+  .seat-left { grid-area: left; }
+  .seat-right { grid-area: right; }
+  .seat-bottom { grid-area: bottom; }
+
+  .seat .player {
+    min-height: auto;
+    padding: 5px 7px;
+    font-size: 0.72rem;
+    border-radius: 6px;
   }
 
-  .seat-left {
-    grid-area: left;
+  .seat .player strong {
+    font-size: 0.76rem;
+    line-height: 1.1;
   }
 
-  .seat-right {
-    grid-area: right;
-  }
-
-  .seat-bottom {
-    grid-area: bottom;
-  }
-
-  .seat-left .player,
-  .seat-right .player,
-  .seat-top .player,
-  .seat-bottom .player {
-    min-height: 58px;
-    padding: 8px;
-    font-size: 0.78rem;
+  .seat .player span {
+    margin-top: 2px;
+    font-size: 0.65rem;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .seat-left .player,
   .seat-right .player {
-    min-height: 58px;
+    min-height: auto;
     align-content: center;
   }
 
-  .seat .player span {
-    margin-top: 4px;
-    font-size: 0.72rem;
-  }
-
   .board {
-    --board-slot: min(68px, calc((100vw - 46px) / var(--board-cols, 1)), calc((58svh - 30px) / var(--board-rows, 1)));
-    --board-slot-row: calc(var(--board-slot) * 1.12);
+    --board-slot: min(56px, calc((100vw - 36px) / var(--board-cols, 1)), calc((34svh - 20px) / var(--board-rows, 1)));
+    --board-slot-row: calc(var(--board-slot) * 1.1);
     width: 100%;
     min-width: 0;
     min-height: 100%;
     max-height: none;
-    border-width: 6px;
-    padding: 8px;
-    background-size: 18px 18px, 18px 18px, auto;
+    border-width: 4px;
+    border-radius: 6px;
+    padding: 6px;
+    background-size: 16px 16px, 16px 16px, auto;
   }
 
-  .playbar {
-    margin-top: 10px;
+  .board:empty::before {
+    font-size: 0.82rem;
   }
 
   .board .domino {
-    width: calc(var(--board-slot) * 0.96);
-    height: calc(var(--board-slot) * 0.52);
-    border-width: max(1px, calc(var(--board-slot) * 0.025));
-    border-radius: max(4px, calc(var(--board-slot) * 0.08));
+    width: calc(var(--board-slot) * 0.94);
+    height: calc(var(--board-slot) * 0.5);
+    border-width: max(1px, calc(var(--board-slot) * 0.022));
+    border-radius: max(3px, calc(var(--board-slot) * 0.07));
   }
 
   .board .domino.vertical,
   .board .domino.double {
-    width: calc(var(--board-slot) * 0.56);
-    height: calc(var(--board-slot) * 1.04);
+    width: calc(var(--board-slot) * 0.54);
+    height: calc(var(--board-slot) * 1.02);
   }
 
   .board .pipbox {
-    padding: max(2px, calc(var(--board-slot) * 0.05));
+    padding: max(1px, calc(var(--board-slot) * 0.04));
   }
 
   .board .pip {
-    width: max(3px, calc(var(--board-slot) * 0.075));
-    height: max(3px, calc(var(--board-slot) * 0.075));
+    width: max(2px, calc(var(--board-slot) * 0.065));
+    height: max(2px, calc(var(--board-slot) * 0.065));
   }
 
   .hand {
     grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 6px;
+    gap: 4px;
     min-height: auto;
-    margin-top: 8px;
-    padding: 8px 0 10px;
+    margin-top: 4px;
+    padding: 4px 0 6px;
   }
 
   .hand .domino {
     width: 100%;
-    height: clamp(68px, 20vw, 86px);
+    height: clamp(56px, 17vw, 74px);
+  }
+
+  .hand .domino.selected {
+    transform: translateY(-5px);
+  }
+
+  .score-panel {
+    margin-top: 4px;
+    padding: 6px 8px;
+  }
+
+  .score-head {
+    gap: 6px;
+  }
+
+  .score-head .eyebrow {
+    font-size: 0.68rem;
+  }
+
+  .score-head strong {
+    font-size: 0.82rem;
   }
 
   .scoreboard {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  .score-row {
+    min-height: 34px;
+    padding: 4px 6px;
+    font-size: 0.74rem;
+  }
+
+  .score-row b {
+    width: 20px;
+    height: 20px;
+    font-size: 0.68rem;
+  }
+
+  .score-row strong {
+    font-size: 0.88rem;
+  }
+
+  .history {
+    margin-top: 4px;
+    padding: 6px 8px;
+    max-height: 100px;
+    overflow-y: auto;
+  }
+
+  .history .eyebrow {
+    font-size: 0.68rem;
+  }
+
+  #log {
+    gap: 3px;
+    font-size: 0.76rem;
   }
 
   .playbar {
     position: sticky;
-    bottom: max(8px, env(safe-area-inset-bottom));
+    bottom: max(4px, env(safe-area-inset-bottom));
     z-index: 5;
-    padding: 8px;
+    margin-top: 4px;
+    padding: 5px;
     border-radius: 8px;
-    background: rgba(16, 24, 32, 0.92);
-    box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.22);
+    background: rgba(16, 24, 32, 0.94);
+    box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
 
   .playbar button {
-    min-height: 50px;
-    padding: 0 10px;
-    font-size: 0.9rem;
+    min-height: 42px;
+    padding: 0 8px;
+    font-size: 0.82rem;
     font-weight: 900;
   }
 }
