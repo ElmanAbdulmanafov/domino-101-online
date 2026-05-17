@@ -8,6 +8,8 @@ const state = {
   mode: "online",
   gameType: "101",
   botCount: 1,
+  soundEnabled: localStorage.getItem("domino101Sound") !== "off",
+  lastSoundSnapshot: null,
   ws: null
 };
 
@@ -22,6 +24,7 @@ const els = {
   registerButton: document.querySelector("#registerButton"),
   authError: document.querySelector("#authError"),
   profileName: document.querySelector("#profileName"),
+  soundToggleButton: document.querySelector("#soundToggleButton"),
   logoutButton: document.querySelector("#logoutButton"),
   nameInput: document.querySelector("#nameInput"),
   serverInput: document.querySelector("#serverInput"),
@@ -74,6 +77,13 @@ function bindControls() {
     localStorage.removeItem("domino101Profile");
     state.profile = null;
     renderAuth();
+  });
+
+  els.soundToggleButton.addEventListener("click", () => {
+    state.soundEnabled = !state.soundEnabled;
+    localStorage.setItem("domino101Sound", state.soundEnabled ? "on" : "off");
+    updateSoundButton();
+    if (state.soundEnabled) playSound("click");
   });
 
   els.serverInput.addEventListener("change", () => {
@@ -159,6 +169,7 @@ function connect() {
       renderProfileHistory();
     }
     if (message.type === "leftRoom") {
+      playSound("leave");
       state.room = null;
       state.selectedTileId = null;
       renderSetup();
@@ -170,6 +181,7 @@ function connect() {
       renderRoomList();
     }
     if (message.type === "roomState") {
+      playRoomSounds(message.room);
       state.room = message.room;
       state.selectedTileId = null;
       render();
@@ -205,6 +217,7 @@ function setBotCount(count) {
 
 function renderSetup() {
   renderAuth();
+  updateSoundButton();
   els.game101Button.classList.toggle("active", state.gameType === "101");
   els.gamePhoneButton.classList.toggle("active", state.gameType === "phone");
   els.onlineModeButton.classList.toggle("active", state.mode === "online");
@@ -217,6 +230,11 @@ function renderSetup() {
   els.joinByCode.hidden = state.mode !== "online";
   els.createRoomButton.textContent = state.mode === "bot" ? "Botla basla" : "Otaq yarat";
   renderProfileHistory();
+}
+
+function updateSoundButton() {
+  if (!els.soundToggleButton) return;
+  els.soundToggleButton.textContent = state.soundEnabled ? "Ses: aciq" : "Ses: bagli";
 }
 
 function renderAuth() {
@@ -496,6 +514,7 @@ function updatePlayButtons() {
 
 function playSelected(side) {
   if (!state.selectedTileId) return;
+  playSound("click");
   send({ type: "playTile", tileId: state.selectedTileId, side });
 }
 
@@ -548,6 +567,72 @@ function loadSavedProfile() {
     return JSON.parse(localStorage.getItem("domino101Profile") || "null");
   } catch {
     return null;
+  }
+}
+
+function playRoomSounds(room) {
+  const game = room.game;
+  const previous = state.lastSoundSnapshot;
+  const current = {
+    boardCount: game?.board?.length || 0,
+    logHead: room.log?.[0] || "",
+    roundNumber: room.roundNumber || 0,
+    matchOver: Boolean(game?.matchOver)
+  };
+
+  state.lastSoundSnapshot = current;
+  if (!previous) return;
+
+  if (current.matchOver && !previous.matchOver) {
+    playSound("win");
+    return;
+  }
+  if (current.roundNumber > previous.roundNumber) {
+    playSound("start");
+    return;
+  }
+  if (current.boardCount > previous.boardCount) {
+    playSound("tile");
+    return;
+  }
+  if (current.logHead !== previous.logHead) {
+    if (current.logHead.includes("xal")) playSound("score");
+    else if (current.logHead.includes("kecdi") || current.logHead.includes("bazardan")) playSound("pass");
+    else if (current.logHead.includes("qosuldu")) playSound("join");
+  }
+}
+
+function playSound(kind) {
+  if (!state.soundEnabled) return;
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+  const context = playSound.context || new AudioContext();
+  playSound.context = context;
+  if (context.state === "suspended") context.resume();
+
+  const patterns = {
+    click: [[520, 0.035, "sine", 0.025]],
+    tile: [[210, 0.045, "triangle", 0.05], [125, 0.04, "sine", 0.035, 0.035]],
+    pass: [[160, 0.08, "sawtooth", 0.025]],
+    score: [[540, 0.06, "sine", 0.04], [760, 0.08, "sine", 0.035, 0.06]],
+    start: [[330, 0.08, "triangle", 0.035], [495, 0.08, "triangle", 0.035, 0.08]],
+    win: [[430, 0.08, "sine", 0.04], [650, 0.1, "sine", 0.04, 0.08], [860, 0.14, "sine", 0.035, 0.18]],
+    join: [[390, 0.05, "sine", 0.03]],
+    leave: [[260, 0.08, "triangle", 0.03]]
+  };
+
+  for (const [frequency, duration, type, volume, delay = 0] of patterns[kind] || patterns.click) {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const start = context.currentTime + delay;
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(volume, start + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    oscillator.connect(gain).connect(context.destination);
+    oscillator.start(start);
+    oscillator.stop(start + duration + 0.02);
   }
 }
 

@@ -199,6 +199,11 @@ h1 {
   box-shadow: inset 0 0 0 1px rgba(246, 241, 231, 0.09);
 }
 
+.profile-bar > div {
+  flex: 1;
+  min-width: 0;
+}
+
 .profile-bar strong {
   color: #fff8ea;
 }
