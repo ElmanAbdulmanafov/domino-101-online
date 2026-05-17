@@ -1,4 +1,5 @@
 const DEFAULT_SERVER_HOST = "domino-101-online.onrender.com";
+const SERVER_STORAGE_VERSION = "render-v1";
 
 const state = {
   clientId: null,
@@ -90,6 +91,7 @@ function bindControls() {
 
   els.serverInput.addEventListener("change", () => {
     localStorage.setItem("domino101Server", normalizeServerAddress(els.serverInput.value));
+    localStorage.setItem("domino101ServerVersion", SERVER_STORAGE_VERSION);
     state.ws?.close();
   });
 
@@ -140,6 +142,7 @@ function bindControls() {
 function connect() {
   const address = normalizeServerAddress(els.serverInput.value);
   localStorage.setItem("domino101Server", address);
+  localStorage.setItem("domino101ServerVersion", SERVER_STORAGE_VERSION);
   const ws = new WebSocket(address);
   state.ws = ws;
 
@@ -152,6 +155,10 @@ function connect() {
   ws.addEventListener("close", () => {
     els.connection.textContent = "Offline";
     window.setTimeout(connect, 1200);
+  });
+
+  ws.addEventListener("error", () => {
+    els.connection.textContent = "Offline";
   });
 
   ws.addEventListener("message", (event) => {
@@ -330,13 +337,17 @@ function renderProfileHistory() {
 
 function savedServerAddress() {
   const saved = localStorage.getItem("domino101Server");
-  if (saved) return saved.replace(/^wss?:\/\//, "");
+  const savedVersion = localStorage.getItem("domino101ServerVersion");
+  const savedHost = displayServerHost(saved);
+  if (savedHost && (savedVersion === SERVER_STORAGE_VERSION || !isLocalNetworkHost(savedHost))) return savedHost;
+  localStorage.setItem("domino101Server", `wss://${DEFAULT_SERVER_HOST}`);
+  localStorage.setItem("domino101ServerVersion", SERVER_STORAGE_VERSION);
   if (location.protocol.startsWith("http") && location.host && !isLocalAppHost(location.host)) return location.host;
   return DEFAULT_SERVER_HOST;
 }
 
 function normalizeServerAddress(value) {
-  const raw = String(value || "").trim() || DEFAULT_SERVER_HOST;
+  const raw = String(value || "").trim().replace(/\/+$/, "") || DEFAULT_SERVER_HOST;
   if (raw.startsWith("ws://") || raw.startsWith("wss://")) return raw;
   if (raw.startsWith("https://")) return `wss://${raw.replace(/^https?:\/\//, "")}`;
   if (raw.startsWith("http://")) return `ws://${raw.replace(/^https?:\/\//, "")}`;
@@ -344,8 +355,24 @@ function normalizeServerAddress(value) {
   return `${protocol}//${raw.replace(/^https?:\/\//, "")}`;
 }
 
+function displayServerHost(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^wss?:\/\//, "")
+    .replace(/^https?:\/\//, "")
+    .replace(/\/+$/, "");
+}
+
 function isLocalAppHost(host) {
   return host === "localhost" || host.startsWith("localhost:") || host === "127.0.0.1" || host.startsWith("127.0.0.1:");
+}
+
+function isLocalNetworkHost(host) {
+  const cleanHost = displayServerHost(host).split(":")[0];
+  return isLocalAppHost(cleanHost)
+    || cleanHost.startsWith("192.168.")
+    || cleanHost.startsWith("10.")
+    || /^172\.(1[6-9]|2\d|3[01])\./.test(cleanHost);
 }
 
 function render() {
