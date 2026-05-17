@@ -8,6 +8,7 @@ const state = {
   room: null,
   rooms: [],
   selectedTileId: null,
+  authMode: "login",
   mode: "online",
   gameType: "101",
   botCount: 1,
@@ -21,12 +22,23 @@ const els = {
   auth: document.querySelector("#auth"),
   setup: document.querySelector("#setup"),
   room: document.querySelector("#room"),
+  authLoginButton: document.querySelector("#authLoginButton"),
+  authCreateButton: document.querySelector("#authCreateButton"),
   registerNameInput: document.querySelector("#registerNameInput"),
   registerUsernameInput: document.querySelector("#registerUsernameInput"),
-  registerPhoneInput: document.querySelector("#registerPhoneInput"),
+  registerPasswordInput: document.querySelector("#registerPasswordInput"),
+  avatarInput: document.querySelector("#avatarInput"),
+  avatarPreview: document.querySelector("#avatarPreview"),
   registerButton: document.querySelector("#registerButton"),
   authError: document.querySelector("#authError"),
+  profileAvatar: document.querySelector("#profileAvatar"),
   profileName: document.querySelector("#profileName"),
+  profileStats: document.querySelector("#profileStats"),
+  profileNameInput: document.querySelector("#profileNameInput"),
+  profileUsernameInput: document.querySelector("#profileUsernameInput"),
+  profileAvatarInput: document.querySelector("#profileAvatarInput"),
+  profileAvatarPreview: document.querySelector("#profileAvatarPreview"),
+  saveProfileButton: document.querySelector("#saveProfileButton"),
   soundToggleButton: document.querySelector("#soundToggleButton"),
   logoutButton: document.querySelector("#logoutButton"),
   nameInput: document.querySelector("#nameInput"),
@@ -81,12 +93,19 @@ window.addEventListener("resize", () => {
 });
 
 function bindControls() {
+  els.authLoginButton.addEventListener("click", () => setAuthMode("login"));
+  els.authCreateButton.addEventListener("click", () => setAuthMode("create"));
   els.registerButton.addEventListener("click", registerFromForm);
   els.logoutButton.addEventListener("click", () => {
     localStorage.removeItem("domino101Profile");
+    localStorage.removeItem("domino101SessionToken");
     state.profile = null;
+    state.myHistory = { matches: [], rooms: [], stats: null };
     renderAuth();
   });
+  els.avatarInput.addEventListener("change", () => readAvatar(els.avatarInput, els.avatarPreview));
+  els.profileAvatarInput.addEventListener("change", () => readAvatar(els.profileAvatarInput, els.profileAvatarPreview));
+  els.saveProfileButton.addEventListener("click", updateProfileFromForm);
 
   els.soundToggleButton.addEventListener("click", () => {
     state.soundEnabled = !state.soundEnabled;
@@ -154,7 +173,8 @@ function connect() {
 
   ws.addEventListener("open", () => {
     els.connection.textContent = "Online";
-    if (state.profile) send({ type: "registerPlayer", profile: state.profile });
+    const sessionToken = localStorage.getItem("domino101SessionToken");
+    if (sessionToken) send({ type: "resumeSession", token: sessionToken });
     send({ type: "listRooms" });
   });
 
@@ -174,10 +194,29 @@ function connect() {
     }
     if (message.type === "playerProfile") {
       state.profile = message.profile;
+      if (message.sessionToken) localStorage.setItem("domino101SessionToken", message.sessionToken);
       localStorage.setItem("domino101Profile", JSON.stringify(message.profile));
       els.nameInput.value = message.profile.name;
+      els.authError.textContent = "";
       renderAuth();
       send({ type: "getMyHistory" });
+    }
+    if (message.type === "authError") {
+      els.authError.textContent = message.message;
+      if (!state.profile?.id) {
+        localStorage.removeItem("domino101Profile");
+        localStorage.removeItem("domino101SessionToken");
+      } else {
+        flash(message.message);
+      }
+      renderAuth();
+    }
+    if (message.type === "authRequired") {
+      els.authError.textContent = message.message || "";
+      state.profile = null;
+      localStorage.removeItem("domino101Profile");
+      localStorage.removeItem("domino101SessionToken");
+      renderAuth();
     }
     if (message.type === "myHistory") {
       state.myHistory = message.history;
@@ -256,30 +295,72 @@ function renderAuth() {
   const registered = Boolean(state.profile?.id);
   els.auth.classList.toggle("hidden", registered);
   els.setup.classList.toggle("hidden", !registered || Boolean(state.room));
+  els.authLoginButton.classList.toggle("active", state.authMode === "login");
+  els.authCreateButton.classList.toggle("active", state.authMode === "create");
+  els.registerButton.textContent = state.authMode === "login" ? "Giris et" : "Hesab yarat";
+  els.registerPasswordInput.autocomplete = state.authMode === "login" ? "current-password" : "new-password";
+  for (const item of els.auth.querySelectorAll(".create-only")) item.hidden = state.authMode !== "create";
   if (registered) {
     els.profileName.textContent = `${state.profile.name}${state.profile.username ? ` (@${state.profile.username})` : ""}`;
     els.nameInput.value ||= state.profile.name;
+    els.profileNameInput.value = state.profile.name || "";
+    els.profileUsernameInput.value = state.profile.username || "";
+    renderAvatar(els.profileAvatar, state.profile);
+    renderAvatar(els.profileAvatarPreview, state.profile);
+    renderProfileStats();
   }
 }
 
-function registerFromForm() {
-  const profile = {
-    id: state.profile?.id,
-    name: els.registerNameInput.value.trim(),
-    username: els.registerUsernameInput.value.trim(),
-    phone: els.registerPhoneInput.value.trim()
-  };
+function setAuthMode(mode) {
+  state.authMode = mode;
+  els.authError.textContent = "";
+  renderAuth();
+}
 
-  if (!profile.name || (!profile.username && !profile.phone)) {
-    els.authError.textContent = "Ad ve telefon veya istifadeci adi yaz.";
+function registerFromForm() {
+  const username = els.registerUsernameInput.value.trim();
+  const password = els.registerPasswordInput.value;
+
+  if (!username || !password) {
+    els.authError.textContent = "Istifadeci adi ve parol yaz.";
     return;
   }
 
   els.authError.textContent = "";
-  state.profile = profile;
-  localStorage.setItem("domino101Profile", JSON.stringify(profile));
-  send({ type: "registerPlayer", profile });
-  renderAuth();
+  if (state.authMode === "login") {
+    send({ type: "loginAccount", credentials: { username, password } });
+    return;
+  }
+
+  const profile = {
+    name: els.registerNameInput.value.trim(),
+    username,
+    password,
+    avatar: els.avatarPreview.dataset.avatar || ""
+  };
+  if (!profile.name) {
+    els.authError.textContent = "Ad soyad yaz.";
+    return;
+  }
+  send({ type: "createAccount", profile });
+}
+
+function updateProfileFromForm() {
+  const profile = {
+    name: els.profileNameInput.value.trim(),
+    username: els.profileUsernameInput.value.trim(),
+    avatar: els.profileAvatarPreview.dataset.avatar || state.profile?.avatar || ""
+  };
+  if (!profile.name || !profile.username) {
+    flash("Ad ve istifadeci adi bos ola bilmez.");
+    return;
+  }
+  send({ type: "updateProfile", profile });
+}
+
+function renderProfileStats() {
+  const stats = state.myHistory?.stats || state.profile?.stats || {};
+  els.profileStats.textContent = `${stats.games || 0} oyun · ${stats.wins || 0} qalibiyyet · ${stats.winRate || 0}%`;
 }
 
 function requireProfile() {
@@ -317,9 +398,10 @@ function renderProfileHistory() {
   if (!els.profileHistory) return;
   const rooms = state.myHistory?.rooms || [];
   const matches = state.myHistory?.matches || [];
+  renderProfileStats();
 
   if (!rooms.length && !matches.length) {
-    els.profileHistory.innerHTML = '<div class="empty-room">Hele oyun tarixcesi yoxdur</div>';
+    els.profileHistory.innerHTML = `${statsCards()}<div class="empty-room">Hele oyun tarixcesi yoxdur</div>`;
     return;
   }
 
@@ -338,7 +420,19 @@ function renderProfileHistory() {
     </article>
   `).join("");
 
-  els.profileHistory.innerHTML = matchItems + roomItems;
+  els.profileHistory.innerHTML = statsCards() + matchItems + roomItems;
+}
+
+function statsCards() {
+  const stats = state.myHistory?.stats || state.profile?.stats || {};
+  return `
+    <div class="stats-grid">
+      <div><strong>${stats.games || 0}</strong><span>Oyun</span></div>
+      <div><strong>${stats.wins || 0}</strong><span>Qalibiyyet</span></div>
+      <div><strong>${stats.winRate || 0}%</strong><span>Faiz</span></div>
+      <div><strong>${stats.points || 0}</strong><span>Umumi xal</span></div>
+    </div>
+  `;
 }
 
 function savedServerAddress() {
@@ -602,11 +696,59 @@ function playerName() {
 }
 
 function loadSavedProfile() {
+  if (!localStorage.getItem("domino101SessionToken")) return null;
   try {
     return JSON.parse(localStorage.getItem("domino101Profile") || "null");
   } catch {
     return null;
   }
+}
+
+function readAvatar(input, preview) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.addEventListener("load", () => resizeAvatar(String(reader.result || ""), preview));
+  reader.readAsDataURL(file);
+}
+
+function resizeAvatar(dataUrl, preview) {
+  const image = new Image();
+  image.addEventListener("load", () => {
+    const canvas = document.createElement("canvas");
+    const size = 160;
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    const side = Math.min(image.width, image.height);
+    const sx = (image.width - side) / 2;
+    const sy = (image.height - side) / 2;
+    ctx.drawImage(image, sx, sy, side, side, 0, 0, size, size);
+    const avatar = canvas.toDataURL("image/jpeg", 0.78);
+    preview.dataset.avatar = avatar;
+    renderAvatar(preview, { avatar, name: state.profile?.name || els.registerNameInput.value || "O" });
+  });
+  image.src = dataUrl;
+}
+
+function renderAvatar(element, profile = {}) {
+  if (!element) return;
+  const avatar = profile.avatar || element.dataset.avatar || "";
+  element.dataset.avatar = avatar;
+  if (avatar) {
+    element.innerHTML = `<img src="${avatar}" alt="" />`;
+    return;
+  }
+  element.textContent = initials(profile.name || profile.username || "O");
+}
+
+function initials(value) {
+  return String(value || "O")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || "")
+    .join("") || "O";
 }
 
 function playRoomSounds(room) {

@@ -21,7 +21,11 @@
       </section>
 
       <section id="auth" class="setup auth-panel">
-        <label>
+        <div class="choice-group" aria-label="Hesab emeliyyati">
+          <button id="authLoginButton" class="choice active" type="button">Giris</button>
+          <button id="authCreateButton" class="choice" type="button">Yeni hesab</button>
+        </div>
+        <label class="create-only">
           Ad soyad
           <input id="registerNameInput" maxlength="18" placeholder="Mes: Elman" autocomplete="name" />
         </label>
@@ -30,22 +34,47 @@
           <input id="registerUsernameInput" maxlength="24" placeholder="Mes: elman101" autocomplete="username" />
         </label>
         <label>
-          Telefon
-          <input id="registerPhoneInput" maxlength="18" placeholder="+994..." inputmode="tel" autocomplete="tel" />
+          Parol
+          <input id="registerPasswordInput" minlength="4" maxlength="32" placeholder="Parol" type="password" autocomplete="current-password" />
         </label>
-        <button id="registerButton" class="primary" type="button">Qeydiyyatdan kec</button>
+        <label class="avatar-picker create-only">
+          Profil sekli
+          <input id="avatarInput" type="file" accept="image/*" />
+          <span id="avatarPreview" class="avatar-preview">?</span>
+        </label>
+        <button id="registerButton" class="primary" type="button">Giris et</button>
         <p id="authError" class="error"></p>
       </section>
 
       <section id="setup" class="setup hidden">
         <div class="profile-bar">
+          <span id="profileAvatar" class="avatar-preview small">?</span>
           <div>
             <p class="eyebrow">Profil</p>
             <strong id="profileName">Oyuncu</strong>
+            <small id="profileStats">0 oyun · 0 qalibiyyet</small>
           </div>
           <button id="soundToggleButton" type="button">Ses: aciq</button>
           <button id="logoutButton" type="button">Cixis</button>
         </div>
+
+        <details class="profile-edit">
+          <summary>Profili duzelt</summary>
+          <label>
+            Ad soyad
+            <input id="profileNameInput" maxlength="18" autocomplete="name" />
+          </label>
+          <label>
+            Istifadeci adi
+            <input id="profileUsernameInput" maxlength="24" autocomplete="username" />
+          </label>
+          <label class="avatar-picker">
+            Profil sekli
+            <input id="profileAvatarInput" type="file" accept="image/*" />
+            <span id="profileAvatarPreview" class="avatar-preview">?</span>
+          </label>
+          <button id="saveProfileButton" type="button">Yadda saxla</button>
+        </details>
 
         <label>
           Adin

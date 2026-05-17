@@ -17,6 +17,7 @@ const TARGET_SCORES = {
 };
 const historyDb = loadHistoryDb();
 const firestore = initFirestore();
+if (firestore) await hydrateHistoryFromFirestore();
 const rooms = new Map();
 const sockets = new Set();
 
@@ -115,10 +116,57 @@ function handleMessage(client, raw) {
     return;
   }
 
+  if (message.type === "resumeSession") {
+    const profile = resumeSession(message.token);
+    if (!profile) {
+      send(client, { type: "authRequired", message: "Sessiya bitib. Yeniden giris et." });
+      return;
+    }
+    setClientProfile(client, profile);
+    send(client, { type: "playerProfile", profile });
+    return;
+  }
+
+  if (message.type === "createAccount") {
+    const result = createAccount(message.profile);
+    if (result.error) {
+      send(client, { type: "authError", message: result.error });
+      return;
+    }
+    setClientProfile(client, result.profile);
+    send(client, { type: "playerProfile", profile: result.profile, sessionToken: result.sessionToken });
+    return;
+  }
+
+  if (message.type === "loginAccount") {
+    const result = loginAccount(message.credentials);
+    if (result.error) {
+      send(client, { type: "authError", message: result.error });
+      return;
+    }
+    setClientProfile(client, result.profile);
+    send(client, { type: "playerProfile", profile: result.profile, sessionToken: result.sessionToken });
+    return;
+  }
+
+  if (message.type === "updateProfile") {
+    if (!client.playerId) {
+      send(client, { type: "authError", message: "Evvelce hesaba gir." });
+      return;
+    }
+    const result = updateAccountProfile(client.playerId, message.profile);
+    if (result.error) {
+      send(client, { type: "authError", message: result.error });
+      return;
+    }
+    setClientProfile(client, result.profile);
+    send(client, { type: "playerProfile", profile: result.profile });
+    return;
+  }
+
   if (message.type === "registerPlayer") {
     const profile = registerPlayer(message.profile);
-    client.playerId = profile.id;
-    client.name = profile.name;
+    setClientProfile(client, profile);
     send(client, { type: "playerProfile", profile });
     return;
   }
@@ -139,7 +187,7 @@ function handleMessage(client, raw) {
       gameType,
       roundNumber: 0,
       lastRoundWinnerId: null,
-      players: [{ id: client.id, playerId: client.playerId, name: client.name, score: 0, connected: true, bot: false }],
+      players: [{ id: client.id, playerId: client.playerId, name: client.name, username: client.username, avatar: client.avatar, score: 0, connected: true, bot: false }],
       game: null,
       hostId: client.id,
       log: []
@@ -196,6 +244,8 @@ function handleMessage(client, raw) {
       existing.playerId = client.playerId;
       existing.connected = true;
       existing.name = client.name;
+      existing.username = client.username;
+      existing.avatar = client.avatar;
       existing.bot = false;
       delete existing.replacedPlayerId;
       if (room.hostId === oldId) room.hostId = client.id;
@@ -207,7 +257,7 @@ function handleMessage(client, raw) {
       if (room.game?.turnPlayerId === oldId) room.game.turnPlayerId = client.id;
       addLog(room, `${client.name} yeniden otaga qayitdi.`);
     } else {
-      room.players.push({ id: client.id, playerId: client.playerId, name: client.name, score: 0, connected: true, bot: false });
+      room.players.push({ id: client.id, playerId: client.playerId, name: client.name, username: client.username, avatar: client.avatar, score: 0, connected: true, bot: false });
       addLog(room, `${client.name} qosuldu.`);
     }
     client.roomCode = code;
@@ -568,6 +618,91 @@ function rankedPlayers(room) {
   return [...room.players].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 }
 
+function setClientProfile(client, profile) {
+  client.playerId = profile.id;
+  client.name = profile.name;
+  client.username = profile.username || "";
+  client.avatar = profile.avatar || "";
+}
+
+function createAccount(rawProfile = {}) {
+  const now = new Date().toISOString();
+  const name = cleanName(rawProfile.name);
+  const username = cleanUsername(rawProfile.username);
+  const password = String(rawProfile.password || "");
+  if (!name) return { error: "Ad yaz." };
+  if (username.length < 3) return { error: "Istifadeci adi en azi 3 simvol olsun." };
+  if (password.length < 4) return { error: "Parol en azi 4 simvol olsun." };
+  if (findPlayerByUsername(username)) return { error: "Bu istifadeci adi artiq movcuddur." };
+
+  const salt = randomId(16);
+  const sessionToken = randomId(32);
+  const account = {
+    id: `player-${randomId(8)}`,
+    name,
+    username,
+    avatar: cleanAvatar(rawProfile.avatar),
+    passwordSalt: salt,
+    passwordHash: passwordHash(password, salt),
+    sessionHash: tokenHash(sessionToken),
+    createdAt: now,
+    updatedAt: now
+  };
+
+  historyDb.players = historyDb.players || {};
+  historyDb.players[account.id] = account;
+  saveHistoryDb();
+  persistAccountToFirestore(account);
+  persistPlayerToFirestore(publicProfile(account));
+  return { profile: publicProfile(account), sessionToken };
+}
+
+function loginAccount(rawCredentials = {}) {
+  const username = cleanUsername(rawCredentials.username);
+  const password = String(rawCredentials.password || "");
+  const account = findPlayerByUsername(username);
+  if (!account || !account.passwordHash || passwordHash(password, account.passwordSalt) !== account.passwordHash) {
+    return { error: "Istifadeci adi ve ya parol yanlisdir." };
+  }
+
+  const sessionToken = randomId(32);
+  account.sessionHash = tokenHash(sessionToken);
+  account.updatedAt = new Date().toISOString();
+  saveHistoryDb();
+  persistAccountToFirestore(account);
+  persistPlayerToFirestore(publicProfile(account));
+  return { profile: publicProfile(account), sessionToken };
+}
+
+function resumeSession(token) {
+  const hash = tokenHash(token);
+  if (!hash) return null;
+  const account = Object.values(historyDb.players || {}).find((player) => player.sessionHash === hash);
+  return account ? publicProfile(account) : null;
+}
+
+function updateAccountProfile(playerId, rawProfile = {}) {
+  const account = historyDb.players?.[playerId];
+  if (!account) return { error: "Hesab tapilmadi." };
+
+  const name = cleanName(rawProfile.name);
+  if (!name) return { error: "Ad bos ola bilmez." };
+
+  const username = cleanUsername(rawProfile.username || account.username);
+  if (username.length < 3) return { error: "Istifadeci adi en azi 3 simvol olsun." };
+  const sameUsername = findPlayerByUsername(username);
+  if (sameUsername && sameUsername.id !== account.id) return { error: "Bu istifadeci adi artiq movcuddur." };
+
+  account.name = name;
+  account.username = username;
+  account.avatar = cleanAvatar(rawProfile.avatar);
+  account.updatedAt = new Date().toISOString();
+  saveHistoryDb();
+  persistAccountToFirestore(account);
+  persistPlayerToFirestore(publicProfile(account));
+  return { profile: publicProfile(account) };
+}
+
 function registerPlayer(rawProfile = {}) {
   const now = new Date().toISOString();
   const existingId = String(rawProfile.id || "").trim();
@@ -575,21 +710,21 @@ function registerPlayer(rawProfile = {}) {
     id: existingId || `player-${randomId(8)}`,
     name: cleanName(rawProfile.name),
     username: cleanUsername(rawProfile.username),
-    phone: cleanPhone(rawProfile.phone),
+    avatar: cleanAvatar(rawProfile.avatar),
     updatedAt: now
   };
 
   const previous = historyDb.players?.[profile.id];
   profile.createdAt = previous?.createdAt || now;
   historyDb.players = historyDb.players || {};
-  historyDb.players[profile.id] = profile;
+  historyDb.players[profile.id] = { ...previous, ...profile };
   saveHistoryDb();
-  persistPlayerToFirestore(profile);
-  return profile;
+  persistPlayerToFirestore(publicProfile(historyDb.players[profile.id]));
+  return publicProfile(historyDb.players[profile.id]);
 }
 
 function getPlayerHistory(playerId) {
-  if (!playerId) return { matches: [], rooms: [] };
+  if (!playerId) return { matches: [], rooms: [], stats: defaultStats() };
 
   const matches = (historyDb.matches || [])
     .filter((match) => match.ranking?.some((player) => player.playerId === playerId || player.id === playerId))
@@ -609,7 +744,48 @@ function getPlayerHistory(playerId) {
       events: (room.events || []).slice(0, 12)
     }));
 
-  return { matches, rooms };
+  return { matches, rooms, stats: getPlayerStats(playerId) };
+}
+
+function getPlayerStats(playerId) {
+  const allMatches = (historyDb.matches || [])
+    .filter((match) => match.ranking?.some((player) => player.playerId === playerId || player.id === playerId));
+  const stats = defaultStats();
+  for (const match of allMatches) {
+    const me = match.ranking?.find((player) => player.playerId === playerId || player.id === playerId);
+    if (!me) continue;
+    stats.games += 1;
+    if (match.gameType === "phone") stats.phoneGames += 1;
+    else stats.games101 += 1;
+    if (match.winner?.playerId === playerId || match.winner?.id === playerId) stats.wins += 1;
+    stats.points += Number(me.score || 0);
+    stats.bestScore = Math.max(stats.bestScore, Number(me.score || 0));
+    stats.lastPlayedAt = stats.lastPlayedAt || match.finishedAt || null;
+  }
+  stats.winRate = stats.games ? Math.round((stats.wins / stats.games) * 100) : 0;
+  return stats;
+}
+
+function defaultStats() {
+  return { games: 0, wins: 0, winRate: 0, points: 0, bestScore: 0, games101: 0, phoneGames: 0, lastPlayedAt: null };
+}
+
+function publicProfile(account = {}) {
+  return {
+    id: account.id,
+    name: account.name,
+    username: account.username,
+    avatar: account.avatar || "",
+    createdAt: account.createdAt,
+    updatedAt: account.updatedAt,
+    stats: getPlayerStats(account.id)
+  };
+}
+
+function findPlayerByUsername(username) {
+  const clean = cleanUsername(username).toLowerCase();
+  if (!clean) return null;
+  return Object.values(historyDb.players || {}).find((player) => cleanUsername(player.username).toLowerCase() === clean) || null;
 }
 
 function cleanUsername(username) {
@@ -619,11 +795,19 @@ function cleanUsername(username) {
     .slice(0, 24);
 }
 
-function cleanPhone(phone) {
-  return String(phone || "")
-    .trim()
-    .replace(/[^0-9+]/g, "")
-    .slice(0, 18);
+function cleanAvatar(avatar) {
+  const value = String(avatar || "");
+  if (!value.startsWith("data:image/")) return "";
+  return value.length <= 120000 ? value : "";
+}
+
+function passwordHash(password, salt) {
+  return createHash("sha256").update(`${salt}:${password}`).digest("hex");
+}
+
+function tokenHash(token) {
+  const value = String(token || "");
+  return value ? createHash("sha256").update(value).digest("hex") : "";
 }
 
 function loadHistoryDb() {
@@ -687,6 +871,39 @@ function loadFirebaseServiceAccount() {
   return null;
 }
 
+async function hydrateHistoryFromFirestore() {
+  try {
+    const [accountSnapshot, matchSnapshot] = await Promise.all([
+      firestore.collection("accounts").get(),
+      firestore.collection("matches").limit(1000).get()
+    ]);
+
+    historyDb.players = historyDb.players || {};
+    accountSnapshot.forEach((doc) => {
+      const account = doc.data();
+      if (account?.id) historyDb.players[account.id] = { ...historyDb.players[account.id], ...account };
+    });
+
+    const firestoreMatches = [];
+    matchSnapshot.forEach((doc) => firestoreMatches.push(doc.data()));
+    if (firestoreMatches.length) {
+      const byKey = new Map((historyDb.matches || []).map((match) => [matchKey(match), match]));
+      for (const match of firestoreMatches) byKey.set(matchKey(match), match);
+      historyDb.matches = [...byKey.values()]
+        .sort((a, b) => String(b.finishedAt || "").localeCompare(String(a.finishedAt || "")))
+        .slice(0, 1000);
+    }
+
+    saveHistoryDb();
+  } catch (error) {
+    console.warn(`Firestore hydrate failed: ${error.message}`);
+  }
+}
+
+function matchKey(match) {
+  return `${match.roomCode || "room"}:${match.finishedAt || ""}:${match.winner?.playerId || match.winner?.id || ""}`;
+}
+
 function saveHistoryDb() {
   mkdirSync(DATA_DIR, { recursive: true });
   writeFileSync(HISTORY_FILE, JSON.stringify(historyDb, null, 2));
@@ -719,6 +936,8 @@ function addLog(room, message) {
     id: player.id,
     playerId: player.playerId || player.replacedPlayerId || null,
     name: player.name,
+    username: player.username || "",
+    avatar: player.avatar || "",
     score: player.score,
     bot: player.bot
   }));
@@ -747,6 +966,8 @@ function saveMatch(room, winner) {
       id: player.id,
       playerId: player.playerId || player.replacedPlayerId || null,
       name: player.name,
+      username: player.username || "",
+      avatar: player.avatar || "",
       score: player.score,
       bot: player.bot
     }))
@@ -755,6 +976,11 @@ function saveMatch(room, winner) {
   historyDb.matches = historyDb.matches.slice(0, 1000);
   saveHistoryDb();
   persistMatchToFirestore(match);
+  for (const player of room.players) {
+    const playerId = player.playerId || player.replacedPlayerId;
+    const account = historyDb.players?.[playerId];
+    if (account) persistPlayerToFirestore(publicProfile(account));
+  }
 }
 
 function persistLogToFirestore(room, entry, storedRoom) {
@@ -802,6 +1028,25 @@ function persistPlayerToFirestore(profile) {
     updatedAt: FieldValue.serverTimestamp()
   }, { merge: true }).catch((error) => {
     console.warn(`Firestore player write failed: ${error.message}`);
+  });
+}
+
+function persistAccountToFirestore(account) {
+  if (!firestore || !account?.id) return;
+
+  firestore.collection("accounts").doc(account.id).set({
+    id: account.id,
+    name: account.name,
+    username: account.username,
+    avatar: account.avatar || "",
+    passwordSalt: account.passwordSalt || "",
+    passwordHash: account.passwordHash || "",
+    sessionHash: account.sessionHash || "",
+    createdAt: account.createdAt || null,
+    updatedAt: account.updatedAt || null,
+    savedAt: FieldValue.serverTimestamp()
+  }, { merge: true }).catch((error) => {
+    console.warn(`Firestore account write failed: ${error.message}`);
   });
 }
 
@@ -980,6 +1225,8 @@ function serializeRoom(room, viewerId) {
       id: player.id,
       playerId: player.playerId || player.replacedPlayerId || null,
       name: player.name,
+      username: player.username || "",
+      avatar: player.avatar || "",
       score: player.score,
       place: index + 1
     })),
@@ -988,6 +1235,8 @@ function serializeRoom(room, viewerId) {
       id: player.id,
       playerId: player.playerId || player.replacedPlayerId || null,
       name: player.name,
+      username: player.username || "",
+      avatar: player.avatar || "",
       score: player.score,
       connected: player.connected,
       bot: player.bot,

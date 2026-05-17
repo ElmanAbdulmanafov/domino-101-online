@@ -194,6 +194,10 @@ h1 {
   max-width: 440px;
 }
 
+.auth-panel [hidden] {
+  display: none;
+}
+
 .profile-bar {
   display: flex;
   align-items: center;
@@ -211,13 +215,68 @@ h1 {
 }
 
 .profile-bar strong {
+  display: block;
   color: #fff8ea;
+}
+
+.profile-bar small {
+  display: block;
+  margin-top: 4px;
+  color: rgba(246, 241, 231, 0.62);
+  font-weight: 800;
 }
 
 .profile-bar button {
   min-height: 38px;
   padding: 0 12px;
   font-weight: 900;
+}
+
+.profile-edit {
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(246, 241, 231, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(246, 241, 231, 0.08);
+}
+
+.profile-edit summary {
+  cursor: pointer;
+  color: #f1bc5b;
+  font-weight: 1000;
+}
+
+.profile-edit label {
+  margin-top: 12px;
+}
+
+.avatar-picker input {
+  min-height: auto;
+  padding: 10px;
+}
+
+.avatar-preview {
+  display: grid;
+  width: 74px;
+  height: 74px;
+  place-items: center;
+  overflow: hidden;
+  border: 2px solid rgba(241, 188, 91, 0.72);
+  border-radius: 50%;
+  background: rgba(246, 241, 231, 0.12);
+  color: #fff8ea;
+  font-weight: 1000;
+}
+
+.avatar-preview.small {
+  width: 54px;
+  height: 54px;
+  flex: 0 0 auto;
+}
+
+.avatar-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .choice-group {
@@ -307,6 +366,31 @@ h1 {
   gap: 8px;
   max-height: 280px;
   overflow: auto;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.stats-grid div {
+  display: grid;
+  gap: 2px;
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(10, 16, 18, 0.38);
+}
+
+.stats-grid strong {
+  color: #f1bc5b;
+  font-size: 1.1rem;
+}
+
+.stats-grid span {
+  color: rgba(246, 241, 231, 0.62);
+  font-size: 0.76rem;
+  font-weight: 900;
 }
 
 .history-card {
@@ -733,6 +817,18 @@ h1 {
   .room-head {
     align-items: flex-end;
     gap: 8px;
+  }
+
+  .profile-bar {
+    flex-wrap: wrap;
+  }
+
+  .profile-bar > div {
+    flex: 1 1 calc(100% - 70px);
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .room-actions {
