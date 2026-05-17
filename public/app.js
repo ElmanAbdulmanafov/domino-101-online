@@ -5,6 +5,8 @@ const state = {
   clientId: null,
   profile: loadSavedProfile(),
   myHistory: { matches: [], rooms: [] },
+  leaderboard: { byWins: [], byPoints: [], byGames: [] },
+  leaderMode: "wins",
   room: null,
   rooms: [],
   selectedTileId: null,
@@ -39,6 +41,11 @@ const els = {
   profileAvatarInput: document.querySelector("#profileAvatarInput"),
   profileAvatarPreview: document.querySelector("#profileAvatarPreview"),
   saveProfileButton: document.querySelector("#saveProfileButton"),
+  refreshLeaderboardButton: document.querySelector("#refreshLeaderboardButton"),
+  leaderWinsButton: document.querySelector("#leaderWinsButton"),
+  leaderPointsButton: document.querySelector("#leaderPointsButton"),
+  leaderGamesButton: document.querySelector("#leaderGamesButton"),
+  leaderboardList: document.querySelector("#leaderboardList"),
   soundToggleButton: document.querySelector("#soundToggleButton"),
   logoutButton: document.querySelector("#logoutButton"),
   nameInput: document.querySelector("#nameInput"),
@@ -146,6 +153,10 @@ function bindControls() {
 
   els.refreshRoomsButton.addEventListener("click", () => send({ type: "listRooms" }));
   els.refreshHistoryButton.addEventListener("click", () => send({ type: "getMyHistory" }));
+  els.refreshLeaderboardButton.addEventListener("click", () => send({ type: "getLeaderboard" }));
+  els.leaderWinsButton.addEventListener("click", () => setLeaderMode("wins"));
+  els.leaderPointsButton.addEventListener("click", () => setLeaderMode("points"));
+  els.leaderGamesButton.addEventListener("click", () => setLeaderMode("games"));
 
   els.startButton.addEventListener("click", () => {
     if (state.room?.game?.matchOver) {
@@ -190,6 +201,7 @@ function connect() {
     const sessionToken = localStorage.getItem("domino101SessionToken");
     if (sessionToken) send({ type: "resumeSession", token: sessionToken });
     send({ type: "listRooms" });
+    send({ type: "getLeaderboard" });
   });
 
   ws.addEventListener("close", () => {
@@ -235,6 +247,10 @@ function connect() {
     if (message.type === "myHistory") {
       state.myHistory = message.history;
       renderProfileHistory();
+    }
+    if (message.type === "leaderboard") {
+      state.leaderboard = message.leaderboard || { byWins: [], byPoints: [], byGames: [] };
+      renderLeaderboard();
     }
     if (message.type === "leftRoom") {
       playSound("leave");
@@ -299,6 +315,7 @@ function renderSetup() {
   els.joinByCode.hidden = state.mode !== "online";
   els.createRoomButton.textContent = state.mode === "bot" ? "Botla basla" : "Otaq yarat";
   renderProfileHistory();
+  renderLeaderboard();
 }
 
 function updateSoundButton() {
@@ -376,6 +393,44 @@ function updateProfileFromForm() {
 function renderProfileStats() {
   const stats = state.myHistory?.stats || state.profile?.stats || {};
   els.profileStats.textContent = `${stats.games || 0} oyun · ${stats.wins || 0} qalibiyyet · ${stats.winRate || 0}%`;
+}
+
+function setLeaderMode(mode) {
+  state.leaderMode = mode;
+  renderLeaderboard();
+}
+
+function renderLeaderboard() {
+  if (!els.leaderboardList) return;
+  els.leaderWinsButton.classList.toggle("active", state.leaderMode === "wins");
+  els.leaderPointsButton.classList.toggle("active", state.leaderMode === "points");
+  els.leaderGamesButton.classList.toggle("active", state.leaderMode === "games");
+  const key = state.leaderMode === "points" ? "byPoints" : state.leaderMode === "games" ? "byGames" : "byWins";
+  const players = state.leaderboard?.[key] || [];
+  if (!players.length) {
+    els.leaderboardList.innerHTML = '<div class="empty-room">Reytinq hele bosdur</div>';
+    return;
+  }
+
+  els.leaderboardList.innerHTML = players.map((player, index) => {
+    const stats = player.stats || {};
+    const value = state.leaderMode === "points"
+      ? `${stats.points || 0} xal`
+      : state.leaderMode === "games"
+        ? `${stats.games || 0} oyun`
+        : `${stats.wins || 0} qalibiyyet`;
+    return `
+      <article class="leader-row ${player.id === state.profile?.id ? "me" : ""}">
+        <b>${index + 1}</b>
+        ${avatarMarkup(player, "tiny")}
+        <span>
+          <strong>${escapeHtml(player.name || "Oyuncu")}</strong>
+          <small>@${escapeHtml(player.username || "player")} · ${stats.winRate || 0}%</small>
+        </span>
+        <em>${value}</em>
+      </article>
+    `;
+  }).join("");
 }
 
 function requireProfile() {
@@ -789,6 +844,12 @@ function renderAvatar(element, profile = {}) {
     return;
   }
   element.textContent = initials(profile.name || profile.username || "O");
+}
+
+function avatarMarkup(profile = {}, size = "") {
+  const classes = ["avatar-preview", size].filter(Boolean).join(" ");
+  if (profile.avatar) return `<span class="${classes}"><img src="${profile.avatar}" alt="" /></span>`;
+  return `<span class="${classes}">${escapeHtml(initials(profile.name || profile.username || "O"))}</span>`;
 }
 
 function initials(value) {

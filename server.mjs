@@ -167,6 +167,11 @@ function handleMessage(client, raw) {
     return;
   }
 
+  if (message.type === "getLeaderboard") {
+    send(client, { type: "leaderboard", leaderboard: getLeaderboard() });
+    return;
+  }
+
   if (message.type === "resumeSession") {
     const profile = resumeSession(message.token);
     if (!profile) {
@@ -822,6 +827,35 @@ function getPlayerStats(playerId) {
   }
   stats.winRate = stats.games ? Math.round((stats.wins / stats.games) * 100) : 0;
   return stats;
+}
+
+function getLeaderboard() {
+  const players = Object.values(historyDb.players || {})
+    .filter((player) => player.id && !player.bot)
+    .map((player) => {
+      const stats = getPlayerStats(player.id);
+      return {
+        id: player.id,
+        name: player.name || "Oyuncu",
+        username: player.username || "",
+        avatar: player.avatar || "",
+        stats
+      };
+    })
+    .filter((player) => player.stats.games > 0 || player.username)
+    .sort((a, b) => {
+      if (b.stats.wins !== a.stats.wins) return b.stats.wins - a.stats.wins;
+      if (b.stats.winRate !== a.stats.winRate) return b.stats.winRate - a.stats.winRate;
+      if (b.stats.points !== a.stats.points) return b.stats.points - a.stats.points;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, 25);
+
+  return {
+    byWins: players.slice(0, 10),
+    byPoints: [...players].sort((a, b) => b.stats.points - a.stats.points || b.stats.wins - a.stats.wins).slice(0, 10),
+    byGames: [...players].sort((a, b) => b.stats.games - a.stats.games || b.stats.wins - a.stats.wins).slice(0, 10)
+  };
 }
 
 function defaultStats() {

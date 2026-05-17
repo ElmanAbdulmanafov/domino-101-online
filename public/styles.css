@@ -272,6 +272,14 @@ h1 {
   flex: 0 0 auto;
 }
 
+.avatar-preview.tiny {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border-width: 1px;
+  font-size: 0.78rem;
+}
+
 .avatar-preview img {
   width: 100%;
   height: 100%;
@@ -332,7 +340,8 @@ h1 {
 }
 
 .lobby,
-.profile-history {
+.profile-history,
+.leaderboard-panel {
   display: grid;
   gap: 10px;
   border-radius: 8px;
@@ -365,6 +374,79 @@ h1 {
   gap: 8px;
   max-height: 280px;
   overflow: auto;
+}
+
+.leader-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.leader-tabs .choice {
+  min-height: 34px;
+  padding: 0 8px;
+  font-size: 0.82rem;
+}
+
+.leaderboard-list {
+  display: grid;
+  gap: 7px;
+  max-height: 330px;
+  overflow: auto;
+}
+
+.leader-row {
+  display: grid;
+  grid-template-columns: 28px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(10, 16, 18, 0.34);
+}
+
+.leader-row.me {
+  background: rgba(241, 188, 91, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(241, 188, 91, 0.34);
+}
+
+.leader-row b {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(246, 241, 231, 0.1);
+  color: #f1bc5b;
+  font-size: 0.82rem;
+}
+
+.leader-row span {
+  min-width: 0;
+}
+
+.leader-row strong,
+.leader-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leader-row strong {
+  color: #fff8ea;
+}
+
+.leader-row small {
+  color: rgba(246, 241, 231, 0.62);
+  font-weight: 800;
+}
+
+.leader-row em {
+  color: #f1bc5b;
+  font-style: normal;
+  font-weight: 1000;
+  white-space: nowrap;
 }
 
 .stats-grid {
@@ -938,6 +1020,32 @@ h1 {
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 4px;
+  }
+
+  .leaderboard-panel {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .leaderboard-list {
+    max-height: 240px;
+    gap: 5px;
+  }
+
+  .leader-row {
+    grid-template-columns: 24px auto minmax(0, 1fr);
+    gap: 6px;
+    padding: 7px;
+  }
+
+  .leader-row em {
+    grid-column: 3;
+    font-size: 0.78rem;
+  }
+
+  .leader-row .avatar-preview.tiny {
+    width: 32px;
+    height: 32px;
   }
 
   .stats-grid div {
