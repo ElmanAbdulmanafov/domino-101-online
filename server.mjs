@@ -16,6 +16,8 @@ const TARGET_SCORES = {
   phone: 365
 };
 let firebaseProjectId = null;
+let firebaseCredentialSource = null;
+let firebaseError = null;
 const historyDb = loadHistoryDb();
 const firestore = initFirestore();
 if (firestore) await hydrateHistoryFromFirestore();
@@ -34,7 +36,13 @@ const mimeTypes = {
 const server = createServer(async (req, res) => {
   if (req.url === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, firebase: Boolean(firestore), firebaseProjectId }));
+    res.end(JSON.stringify({
+      ok: true,
+      firebase: Boolean(firestore),
+      firebaseProjectId,
+      firebaseCredentialSource,
+      firebaseError
+    }));
     return;
   }
 
@@ -874,6 +882,7 @@ function loadHistoryDb() {
 function initFirestore() {
   const serviceAccount = loadFirebaseServiceAccount();
   if (!serviceAccount) {
+    firebaseError ||= "Firebase service account env not found";
     console.log("Firebase disabled: using local JSON history fallback.");
     return null;
   }
@@ -885,9 +894,11 @@ function initFirestore() {
       });
     }
     firebaseProjectId = serviceAccount.project_id || null;
+    firebaseError = null;
     console.log(`Firebase enabled: ${serviceAccount.project_id}`);
     return getFirestore();
   } catch (error) {
+    firebaseError = error.message;
     console.warn(`Firebase init failed: ${error.message}`);
     return null;
   }
@@ -896,22 +907,28 @@ function initFirestore() {
 function loadFirebaseServiceAccount() {
   try {
     if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
-      const decoded = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, "base64").toString("utf8");
+      firebaseCredentialSource = "FIREBASE_SERVICE_ACCOUNT_BASE64";
+      const encoded = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64.trim().replace(/\s/g, "");
+      const decoded = Buffer.from(encoded, "base64").toString("utf8");
       return JSON.parse(decoded);
     }
 
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      const normalized = process.env.FIREBASE_SERVICE_ACCOUNT.replace(/\\n/g, "\n");
+      firebaseCredentialSource = "FIREBASE_SERVICE_ACCOUNT";
+      const normalized = process.env.FIREBASE_SERVICE_ACCOUNT.trim().replace(/\\n/g, "\n");
       return JSON.parse(normalized);
     }
 
     if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+      firebaseCredentialSource = "FIREBASE_SERVICE_ACCOUNT_PATH";
       return JSON.parse(readFileSync(process.env.FIREBASE_SERVICE_ACCOUNT_PATH, "utf8"));
     }
   } catch (error) {
+    firebaseError = error.message;
     console.warn(`Firebase credential parse failed: ${error.message}`);
   }
 
+  firebaseCredentialSource = null;
   return null;
 }
 
