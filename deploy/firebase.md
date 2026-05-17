@@ -21,10 +21,20 @@ Firebase enabled: domino-a6bfb
 Firestore collections:
 
 ```text
+accounts/{playerId}
+players/{playerId}
 rooms/{roomCode}
 rooms/{roomCode}/events/{eventId}
 matches/{matchId}
 ```
+
+Health yoxlamasinda Firebase aktivdirsə belə cavab gəlməlidir:
+
+```text
+{"ok":true,"firebase":true,"firebaseProjectId":"domino-a6bfb"}
+```
+
+Əgər `"firebase":false` gəlirsə, Render-də `FIREBASE_SERVICE_ACCOUNT_BASE64` və ya `FIREBASE_SERVICE_ACCOUNT` env dəyişəni qurulmayıb.
 
 ## Render env
 

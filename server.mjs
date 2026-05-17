@@ -15,6 +15,7 @@ const TARGET_SCORES = {
   "101": 101,
   phone: 365
 };
+let firebaseProjectId = null;
 const historyDb = loadHistoryDb();
 const firestore = initFirestore();
 if (firestore) await hydrateHistoryFromFirestore();
@@ -33,7 +34,7 @@ const mimeTypes = {
 const server = createServer(async (req, res) => {
   if (req.url === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true }));
+    res.end(JSON.stringify({ ok: true, firebase: Boolean(firestore), firebaseProjectId }));
     return;
   }
 
@@ -841,6 +842,7 @@ function initFirestore() {
         credential: cert(serviceAccount)
       });
     }
+    firebaseProjectId = serviceAccount.project_id || null;
     console.log(`Firebase enabled: ${serviceAccount.project_id}`);
     return getFirestore();
   } catch (error) {
