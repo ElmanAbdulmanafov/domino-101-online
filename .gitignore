@@ -8,3 +8,4 @@ firebase-service-account*.json
 *-firebase-adminsdk-*.json
 dist/
 .DS_Store
+public/_backup_visual/

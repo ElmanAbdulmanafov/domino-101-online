@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
 const PORT = Number(process.env.PORT || 4173);
@@ -18,8 +19,10 @@ const TARGET_SCORES = {
 let firebaseProjectId = null;
 let firebaseCredentialSource = null;
 let firebaseError = null;
+let _saveTimer = null;
 const historyDb = loadHistoryDb();
 const firestore = initFirestore();
+const firebaseWebConfig = loadFirebaseWebConfig();
 if (firestore) await hydrateHistoryFromFirestore();
 const rooms = new Map();
 const sockets = new Set();
@@ -41,7 +44,17 @@ const server = createServer(async (req, res) => {
       firebase: Boolean(firestore),
       firebaseProjectId,
       firebaseCredentialSource,
-      firebaseError
+      firebaseError,
+      googleAuthConfigured: Boolean(firebaseWebConfig)
+    }));
+    return;
+  }
+
+  if (req.url === "/auth-config") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      googleAuthEnabled: Boolean(firestore && firebaseWebConfig),
+      firebaseConfig: firebaseWebConfig
     }));
     return;
   }
@@ -110,7 +123,10 @@ server.on("upgrade", (req, socket) => {
       return;
     }
     for (const message of messages) {
-      handleMessage(client, message);
+      handleMessage(client, message).catch((error) => {
+        console.warn(`Message handling failed: ${error.message}`);
+        send(client, { type: "error", message: "Sorğunu icra etmək mümkün olmadi." });
+      });
     }
   });
 
@@ -148,7 +164,7 @@ setInterval(() => {
   broadcastLobby();
 }, 5 * 60 * 1000);
 
-function handleMessage(client, raw) {
+async function handleMessage(client, raw) {
   let message;
   try {
     message = JSON.parse(raw);
@@ -279,6 +295,18 @@ function handleMessage(client, raw) {
     return;
   }
 
+  if (message.type === "googleLogin") {
+    const result = await loginWithGoogleToken(message.idToken);
+    if (result.error) {
+      send(client, { type: "authError", message: result.error });
+      return;
+    }
+    setClientProfile(client, result.profile);
+    send(client, { type: "playerProfile", profile: result.profile, sessionToken: result.sessionToken });
+    send(client, { type: "friendsState", friendsState: getFriendsState(client.playerId) });
+    return;
+  }
+
   if (message.type === "updateProfile") {
     if (!client.playerId) {
       send(client, { type: "authError", message: "Evvelce hesaba gir." });
@@ -296,9 +324,7 @@ function handleMessage(client, raw) {
   }
 
   if (message.type === "registerPlayer") {
-    const profile = registerPlayer(message.profile);
-    setClientProfile(client, profile);
-    send(client, { type: "playerProfile", profile });
+    send(client, { type: "authError", message: "Bu giris novu artiq desteklenmir. Hesaba giris et." });
     return;
   }
 
@@ -310,12 +336,13 @@ function handleMessage(client, raw) {
     leaveRoom(client);
     client.name = cleanName(message.name || client.name);
     const code = newRoomCode();
-    const mode = message.mode === "bot" ? "bot" : "online";
     const gameType = message.gameType === "phone" ? "phone" : "101";
+    const targetPlayers = clampPlayers(message.players);
     const room = {
       code,
-      mode,
+      mode: "online",
       gameType,
+      targetPlayers,
       roundNumber: 0,
       lastRoundWinnerId: null,
       players: [{ id: client.id, playerId: client.playerId, name: client.name, username: client.username, avatar: client.avatar, score: 0, connected: true, bot: false }],
@@ -325,20 +352,13 @@ function handleMessage(client, raw) {
       chat: []
     };
 
-    if (mode === "bot") {
-      const botCount = clampBotCount(message.botCount);
-      const botNames = ["Bot Rauf", "Bot Leyla", "Bot Murad"];
-      for (let i = 0; i < botCount; i += 1) {
-        room.players.push({ id: `bot-${randomId(4)}`, name: botNames[i], score: 0, connected: true, bot: true });
-      }
-    }
-
     rooms.set(code, room);
-    addLog(room, `${gameTitle(gameType)} otagi yaradildi.`);
+    addLog(room, `${gameTitle(gameType)} otagi yaradildi. Oyuncu gozlenilir...`);
     client.roomCode = code;
     broadcastRoom(room);
     broadcastLobby();
-    maybeRunBot(room);
+    // Bir neçə saniyə real oyunçu gözlə; gəlməsə botlarla doldurub oyunu başlat.
+    room.autoFillTimer = setTimeout(() => fillAndStartRoom(code), AUTO_FILL_MS);
     return;
   }
 
@@ -353,23 +373,27 @@ function handleMessage(client, raw) {
       send(client, { type: "error", message: "Bu kodla otaq tapilmadi." });
       return;
     }
-    if (room.mode !== "online") {
+    const sameProfileSeat = room.players.find((p) => p.playerId === client.playerId || p.replacedPlayerId === client.playerId);
+    const alreadySeated = room.players.some((p) => p.id === client.id);
+    // Real oyunçu gələndə boş bot yerini tuta bilsin (oyun ortasında da).
+    const botSeat = (!sameProfileSeat && !alreadySeated) ? room.players.find((p) => p.bot) : null;
+
+    if (room.mode !== "online" && !sameProfileSeat) {
       send(client, { type: "error", message: "Bu otaq bot oyunu ucundur." });
       return;
     }
-    const sameProfileSeat = room.players.find((p) => p.playerId === client.playerId || p.replacedPlayerId === client.playerId);
-    if (room.game && !sameProfileSeat) {
+    if (room.game && !sameProfileSeat && !alreadySeated && !botSeat) {
       send(client, { type: "error", message: "Bu otaqda oyun baslayib." });
       return;
     }
-    if (room.players.length >= 4 && !room.players.some((p) => p.id === client.id) && !sameProfileSeat) {
+    if (!room.game && room.players.length >= 4 && !alreadySeated && !sameProfileSeat && !botSeat) {
       send(client, { type: "error", message: "Otaq doludur." });
       return;
     }
 
     leaveRoom(client);
     client.name = cleanName(message.name || client.name);
-    const existing = sameProfileSeat || room.players.find((p) => p.id === client.id);
+    const existing = sameProfileSeat || room.players.find((p) => p.id === client.id) || botSeat;
     if (existing) {
       const oldId = existing.id;
       existing.id = client.id;
@@ -393,8 +417,14 @@ function handleMessage(client, raw) {
       addLog(room, `${client.name} qosuldu.`);
     }
     client.roomCode = code;
-    broadcastRoom(room);
-    broadcastLobby();
+    // Hədəf oyunçu sayına çatıbsa, gözləməyə ehtiyac yoxdur — dərhal başla.
+    if (!room.game && room.players.length >= clampPlayers(room.targetPlayers)) {
+      fillAndStartRoom(code);
+    } else {
+      broadcastRoom(room);
+      broadcastLobby();
+      maybeRunBot(room);
+    }
     return;
   }
 
@@ -409,14 +439,8 @@ function handleMessage(client, raw) {
       send(client, { type: "error", message: "Oyunu yalniz otaq sahibi baslada biler." });
       return;
     }
-    if (room.players.length < 2) {
-      send(client, { type: "error", message: "Oyun ucun en azi 2 oyuncu lazimdir." });
-      return;
-    }
-    startRound(room);
-    broadcastRoom(room);
-    broadcastLobby();
-    maybeRunBot(room);
+    // Host dərhal başlatmaq istəyirsə, masanı botlarla doldurub başla.
+    fillAndStartRoom(room.code);
     return;
   }
 
@@ -434,7 +458,22 @@ function handleMessage(client, raw) {
     return;
   }
 
+  if (message.type === "playDoubles") {
+    playMultiDoubles(room, client.id, message.plays);
+    broadcastRoom(room);
+    afterMove(room);
+    return;
+  }
+
   if (message.type === "restartMatch") {
+    if (room.hostId !== client.id) {
+      send(client, { type: "error", message: "Yalniz otaq sahibi yeniden baslada biler." });
+      return;
+    }
+    if (room.players.filter((p) => p.connected || p.bot).length < 2) {
+      send(client, { type: "error", message: "En azi 2 oyuncu lazimdir." });
+      return;
+    }
     room.players = room.players.map((p) => ({ ...p, score: 0 }));
     startRound(room);
     broadcastRoom(room);
@@ -462,19 +501,26 @@ function disconnect(client) {
   if (!sockets.has(client)) return;
   sockets.delete(client);
   const room = rooms.get(client.roomCode);
-  if (room) {
-    const player = room.players.find((p) => p.id === client.id);
-    if (player) {
+  if (!room) return;
+  const player = room.players.find((p) => p.id === client.id);
+  if (player && !player.bot) {
+    if (room.game && !room.game.matchOver) {
+      // Aktiv oyunda oyunçunu botla əvəz et ki, növbə ilişməsin və oyun donmasın.
+      // Oyunçu yenidən qoşulanda yerini (və əldəki daşları) geri ala bilər (replacedPlayerId).
+      replaceClientWithBot(room, client, "baglantini itirdi");
+    } else {
       player.connected = false;
       addLog(room, `${player.name} baglantini itirdi.`);
     }
-    if (room.players.every((p) => !p.connected || p.bot)) {
-      rooms.delete(room.code);
-    } else {
-      broadcastRoom(room);
-    }
-    broadcastLobby();
   }
+  if (room.players.every((p) => !p.connected || p.bot)) {
+    if (room.autoFillTimer) clearTimeout(room.autoFillTimer);
+    rooms.delete(room.code);
+  } else {
+    broadcastRoom(room);
+    maybeRunBot(room);
+  }
+  broadcastLobby();
 }
 
 function leaveRoom(client) {
@@ -539,7 +585,9 @@ function startRound(room) {
     passCount: 0,
     roundOver: false,
     matchOver: false,
-    message: opening.message
+    message: opening.message,
+    lastScoreEvent: null,
+    roundSummary: null
   };
   addLog(room, `${gameTitle(room.gameType)} raundu basladi.`);
 }
@@ -563,12 +611,13 @@ function chooseOpening(room, hands) {
       };
     }
 
+    // Sıra ilə qoşalar: 1|1, 2|2, 3|3, 4|4, 5|5, 6|6
     const lowestDouble = findLowestDoubleOwner(room, hands);
     if (lowestDouble) {
       return {
         playerId: lowestDouble.player.id,
         tileId: lowestDouble.tile.id,
-        message: `${lowestDouble.player.name} en asagi qosa ${lowestDouble.tile.a}:${lowestDouble.tile.b} ile baslamalidir.`
+        message: `${lowestDouble.player.name} en kicik qosa ${lowestDouble.tile.a}:${lowestDouble.tile.b} ile baslamalidir.`
       };
     }
   }
@@ -633,6 +682,7 @@ function playTile(room, playerId, tileId, side) {
     if (points > 0 && player) {
       player.score += points;
       game.message = `${player.name} ${points} xal yazdi.`;
+      game.lastScoreEvent = scoreEvent(player, points, "Telefon xali");
       addLog(room, `${player.name}: +${points} Telefon xali.`);
       if (isMatchWinner(room, player)) {
         finishMatch(room, player);
@@ -650,6 +700,123 @@ function playTile(room, playerId, tileId, side) {
 
   game.turnPlayerId = nextPlayer(room, playerId);
   if (room.gameType !== "phone" || !game.message.includes("xal yazdi")) {
+    game.message = "Novbeti oyuncu oynayir.";
+  }
+}
+
+// Bir sırada birdən çox qoşa daşı oynamaq
+// Şərt: bütün daşlar qoşa olmalıdır, son mövqe xal yazmalıdır
+function playMultiDoubles(room, playerId, plays) {
+  const game = room.game;
+  if (!game || game.roundOver || game.matchOver) return;
+  if (game.turnPlayerId !== playerId) return;
+  if (room.gameType !== "phone") return;
+  if (!Array.isArray(plays) || plays.length < 2 || plays.length > 7) return;
+
+  // Eyni daşın təkrarlanmaması
+  const seenIds = new Set();
+  for (const play of plays) {
+    if (!play || typeof play.tileId !== "string" || seenIds.has(play.tileId)) return;
+    seenIds.add(play.tileId);
+  }
+
+  const hand = game.hands[playerId] || [];
+  const player = room.players.find((p) => p.id === playerId);
+
+  // Bütün daşların əldə mövcud qoşa olduğunu yoxla
+  for (const play of plays) {
+    const tile = hand.find((t) => t.id === play.tileId);
+    if (!tile) {
+      send(findClient(playerId), { type: "error", message: "Daş əldə tapılmadı." });
+      return;
+    }
+    if (tile.a !== tile.b) {
+      send(findClient(playerId), { type: "error", message: "Yalnız qoşa daşları birlikdə oynamaq olar." });
+      return;
+    }
+  }
+
+  // Hər gedişi normalizeMove ilə yoxla (ardıcıl şəkildə)
+  const movesToApply = [];
+  const tempGame = JSON.parse(JSON.stringify(game)); // simulyasiya üçün klon
+
+  for (const play of plays) {
+    const tileIndex = tempGame.hands[playerId].findIndex((t) => t.id === play.tileId);
+    if (tileIndex === -1) {
+      send(findClient(playerId), { type: "error", message: "Daş simulyasiyada tapılmadı." });
+      return;
+    }
+    const tile = tempGame.hands[playerId][tileIndex];
+    const move = normalizeMove(tempGame, tile, play.side);
+    if (!move) {
+      send(findClient(playerId), { type: "error", message: `${tile.a}:${tile.b} daşı ${play.side} tərəfə qoyula bilmir.` });
+      return;
+    }
+
+    tempGame.hands[playerId].splice(tileIndex, 1);
+    tempGame.requiredOpeningTileId = null;
+    tempGame.passCount = 0;
+    tempGame.left = move.left;
+    tempGame.right = move.right;
+
+    if (move.side === "left") tempGame.board.unshift(move.tile);
+    else if (move.side === "right") tempGame.board.push(move.tile);
+    else if (move.side === "phoneTop" || move.side === "phoneBottom") {
+      const branch = move.side === "phoneTop" ? tempGame.phone.top : tempGame.phone.bottom;
+      branch.tiles.push(move.tile);
+      branch.end = move.end;
+    }
+    refreshPhone(tempGame);
+    movesToApply.push({ tileId: play.tileId, side: play.side, move });
+  }
+
+  // Son mövqedə xal var mı yoxla
+  const finalPoints = phoneScore(tempGame);
+  if (finalPoints === 0) {
+    send(findClient(playerId), { type: "error", message: "Bu kombinasiya xal yazmır. Qoşaları ayrıca oyna." });
+    return;
+  }
+
+  // Hamısı keçdi — real game-ə tətbiq et
+  for (const { tileId, side, move } of movesToApply) {
+    const tileIndex = game.hands[playerId].findIndex((t) => t.id === tileId);
+    const tile = game.hands[playerId][tileIndex];
+    game.hands[playerId].splice(tileIndex, 1);
+    game.requiredOpeningTileId = null;
+    game.passCount = 0;
+    game.left = move.left;
+    game.right = move.right;
+
+    if (move.side === "left") game.board.unshift(move.tile);
+    else if (move.side === "right") game.board.push(move.tile);
+    else if (move.side === "phoneTop" || move.side === "phoneBottom") {
+      const branch = move.side === "phoneTop" ? game.phone.top : game.phone.bottom;
+      branch.tiles.push(move.tile);
+      branch.end = move.end;
+    }
+    refreshPhone(game);
+    addLog(room, `${player?.name || "Oyuncu"} ${tile.a}:${tile.b} qoydu.`);
+  }
+
+  // Xal yaz
+  if (player) {
+    player.score += finalPoints;
+    game.message = `${player.name} ${finalPoints} xal yazdi (${plays.length} qosa).`;
+    game.lastScoreEvent = scoreEvent(player, finalPoints, `${plays.length} qosa`);
+    addLog(room, `${player.name}: +${finalPoints} - ${plays.length} qosa birlikde oynanildi.`);
+    if (isMatchWinner(room, player)) {
+      finishMatch(room, player);
+      return;
+    }
+  }
+
+  if (game.hands[playerId].length === 0) {
+    finishRound(room, playerId, "El bitdi.");
+    return;
+  }
+
+  game.turnPlayerId = nextPlayer(room, playerId);
+  if (!game.message.includes("xal yazdi")) {
     game.message = "Novbeti oyuncu oynayir.";
   }
 }
@@ -697,22 +864,31 @@ function passTurn(room, playerId) {
 
 function finishRound(room, winnerId, reason) {
   const game = room.game;
-  const points = room.players.reduce((sum, player) => {
-    if (player.id === winnerId) return sum;
-    return sum + handValue(game.hands[player.id] || []);
-  }, 0);
+  const roundHands = room.players.map((player) => ({
+    id: player.id,
+    playerId: player.playerId || player.replacedPlayerId || null,
+    name: player.name,
+    username: player.username || "",
+    bot: Boolean(player.bot),
+    handValue: handValue(game.hands[player.id] || []),
+    tiles: (game.hands[player.id] || []).map((tile) => ({ id: tile.id, a: tile.a, b: tile.b }))
+  }));
+  const points = roundHands.reduce((sum, player) => player.id === winnerId ? sum : sum + player.handValue, 0);
 
   const winner = room.players.find((p) => p.id === winnerId);
   if (winner && room.gameType === "101") winner.score += points;
+  let awardedPoints = points;
   if (winner && room.gameType === "phone") {
     const rounded = roundUpToFive(points);
     winner.score += rounded;
+    awardedPoints = rounded;
     if (rounded > 0) {
       addLog(room, `${winner.name}: +${rounded} el sonu xali.`);
     }
   }
   if (winner) room.lastRoundWinnerId = winner.id;
   game.roundOver = true;
+  game.roundSummary = roundSummaryEvent(room, winner, reason, points, awardedPoints, roundHands);
   if (winner && isMatchWinner(room, winner)) {
     finishMatch(room, winner);
     return;
@@ -820,6 +996,58 @@ function loginAccount(rawCredentials = {}) {
   return { profile: publicProfile(account), sessionToken };
 }
 
+async function loginWithGoogleToken(idToken) {
+  if (!firestore) return { error: "Google girisi serverde hele aktiv deyil." };
+  const token = String(idToken || "").trim();
+  if (!token) return { error: "Google girisi tamamlanmadi." };
+
+  let decoded;
+  try {
+    decoded = await getAuth().verifyIdToken(token);
+  } catch {
+    return { error: "Google hesabi dogrulanmadi. Yeniden yoxla." };
+  }
+
+  const provider = decoded.firebase?.sign_in_provider;
+  if (provider !== "google.com") return { error: "Google hesabi ile daxil ol." };
+
+  const firebaseUid = String(decoded.uid || "");
+  const email = String(decoded.email || "").trim().toLowerCase();
+  const now = new Date().toISOString();
+  let account = Object.values(historyDb.players || {}).find((player) => player.firebaseUid === firebaseUid);
+  if (!account) {
+    const name = cleanName(decoded.name || email.split("@")[0] || "Oyuncu");
+    const baseUsername = cleanUsername(email.split("@")[0] || `google_${firebaseUid.slice(0, 8)}`) || "google_player";
+    account = {
+      id: `player-${randomId(8)}`,
+      name,
+      username: uniqueUsername(baseUsername),
+      avatar: cleanRemoteAvatar(decoded.picture),
+      firebaseUid,
+      email,
+      authProvider: "google",
+      friends: [],
+      createdAt: now,
+      updatedAt: now
+    };
+    historyDb.players = historyDb.players || {};
+    historyDb.players[account.id] = account;
+  } else {
+    account.firebaseUid = firebaseUid;
+    account.email = email || account.email || "";
+    account.authProvider = "google";
+    if (!account.avatar) account.avatar = cleanRemoteAvatar(decoded.picture);
+    account.updatedAt = now;
+  }
+
+  const sessionToken = randomId(32);
+  account.sessionHash = tokenHash(sessionToken);
+  saveHistoryDb();
+  persistAccountToFirestore(account);
+  persistPlayerToFirestore(publicProfile(account));
+  return { profile: publicProfile(account), sessionToken };
+}
+
 function resumeSession(token) {
   const hash = tokenHash(token);
   if (!hash) return null;
@@ -847,26 +1075,6 @@ function updateAccountProfile(playerId, rawProfile = {}) {
   persistAccountToFirestore(account);
   persistPlayerToFirestore(publicProfile(account));
   return { profile: publicProfile(account) };
-}
-
-function registerPlayer(rawProfile = {}) {
-  const now = new Date().toISOString();
-  const existingId = String(rawProfile.id || "").trim();
-  const profile = {
-    id: existingId || `player-${randomId(8)}`,
-    name: cleanName(rawProfile.name),
-    username: cleanUsername(rawProfile.username),
-    avatar: cleanAvatar(rawProfile.avatar),
-    updatedAt: now
-  };
-
-  const previous = historyDb.players?.[profile.id];
-  profile.createdAt = previous?.createdAt || now;
-  historyDb.players = historyDb.players || {};
-  historyDb.players[profile.id] = { ...previous, ...profile };
-  saveHistoryDb();
-  persistPlayerToFirestore(publicProfile(historyDb.players[profile.id]));
-  return publicProfile(historyDb.players[profile.id]);
 }
 
 function getPlayerHistory(playerId) {
@@ -1130,6 +1338,16 @@ function findPlayerByUsername(username) {
   return Object.values(historyDb.players || {}).find((player) => cleanUsername(player.username).toLowerCase() === clean) || null;
 }
 
+function uniqueUsername(baseUsername) {
+  let username = cleanUsername(baseUsername).slice(0, 20) || "google_player";
+  if (!findPlayerByUsername(username)) return username;
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${username.slice(0, 20)}_${index}`.slice(0, 24);
+    if (!findPlayerByUsername(candidate)) return candidate;
+  }
+  return `google_${randomId(8)}`;
+}
+
 function cleanUsername(username) {
   return String(username || "")
     .trim()
@@ -1139,8 +1357,14 @@ function cleanUsername(username) {
 
 function cleanAvatar(avatar) {
   const value = String(avatar || "");
+  if (value.startsWith("https://")) return cleanRemoteAvatar(value);
   if (!value.startsWith("data:image/")) return "";
   return value.length <= 120000 ? value : "";
+}
+
+function cleanRemoteAvatar(avatar) {
+  const value = String(avatar || "");
+  return value.startsWith("https://") && value.length <= 1000 ? value : "";
 }
 
 function passwordHash(password, salt) {
@@ -1225,6 +1449,27 @@ function loadFirebaseServiceAccount() {
   return null;
 }
 
+function loadFirebaseWebConfig() {
+  try {
+    if (process.env.FIREBASE_WEB_CONFIG) {
+      const config = JSON.parse(process.env.FIREBASE_WEB_CONFIG);
+      if (config.apiKey && config.authDomain && config.projectId && config.appId) return config;
+    }
+    const config = {
+      apiKey: process.env.FIREBASE_WEB_API_KEY,
+      authDomain: process.env.FIREBASE_WEB_AUTH_DOMAIN,
+      projectId: process.env.FIREBASE_WEB_PROJECT_ID || firebaseProjectId,
+      storageBucket: process.env.FIREBASE_WEB_STORAGE_BUCKET,
+      messagingSenderId: process.env.FIREBASE_WEB_MESSAGING_SENDER_ID,
+      appId: process.env.FIREBASE_WEB_APP_ID
+    };
+    if (config.apiKey && config.authDomain && config.projectId && config.appId) return config;
+  } catch (error) {
+    console.warn(`Firebase web config parse failed: ${error.message}`);
+  }
+  return null;
+}
+
 async function hydrateHistoryFromFirestore() {
   try {
     const [accountSnapshot, matchSnapshot, requestSnapshot, messageSnapshot] = await Promise.all([
@@ -1280,7 +1525,6 @@ function matchKey(match) {
   return `${match.roomCode || "room"}:${match.finishedAt || ""}:${match.winner?.playerId || match.winner?.id || ""}`;
 }
 
-let _saveTimer = null;
 function saveHistoryDb() {
   if (_saveTimer) return;
   _saveTimer = setTimeout(() => {
@@ -1449,6 +1693,9 @@ function persistAccountToFirestore(account) {
     passwordHash: account.passwordHash || "",
     sessionHash: account.sessionHash || "",
     friends: Array.isArray(account.friends) ? account.friends : [],
+    firebaseUid: account.firebaseUid || "",
+    email: account.email || "",
+    authProvider: account.authProvider || "password",
     createdAt: account.createdAt || null,
     updatedAt: account.updatedAt || null,
     savedAt: FieldValue.serverTimestamp()
@@ -1523,9 +1770,10 @@ function nextPlayer(room, playerId) {
 }
 
 function lowestHandPlayer(room) {
-  return room.players
+  const ranked = room.players
     .map((player) => ({ id: player.id, value: handValue(room.game.hands[player.id] || []) }))
-    .sort((a, b) => a.value - b.value)[0].id;
+    .sort((a, b) => a.value - b.value);
+  return ranked[0]?.id || null;
 }
 
 function handValue(hand) {
@@ -1537,14 +1785,84 @@ function roundUpToFive(value) {
   return Math.ceil(value / 5) * 5;
 }
 
+function scoreEvent(player, points, reason) {
+  return {
+    id: `score-${Date.now()}-${randomId(4)}`,
+    playerId: player.playerId || player.replacedPlayerId || player.id,
+    clientId: player.id,
+    name: player.name || "Oyuncu",
+    points,
+    reason,
+    at: new Date().toISOString()
+  };
+}
+
+function roundSummaryEvent(room, winner, reason, rawPoints, awardedPoints, hands) {
+  return {
+    id: `round-${room.code}-${room.roundNumber || 0}-${Date.now()}`,
+    roundNumber: room.roundNumber || 0,
+    reason,
+    gameType: room.gameType,
+    winner: winner
+      ? {
+          id: winner.id,
+          playerId: winner.playerId || winner.replacedPlayerId || null,
+          name: winner.name,
+          score: winner.score
+        }
+      : null,
+    rawPoints,
+    awardedPoints,
+    hands,
+    at: new Date().toISOString()
+  };
+}
+
 function clampBotCount(value) {
   const count = Number(value || 1);
   return Math.min(3, Math.max(1, Number.isFinite(count) ? Math.trunc(count) : 1));
 }
 
+const AUTO_FILL_MS = 5000;
+const BOT_NAMES = ["Elvin", "Nigar", "Tural", "Aysel", "Rauf", "Leyla", "Murad", "Kamran", "Gunel", "Orxan", "Samir", "Narmin", "Vusal", "Sevda", "Kanan", "Lale"];
+
+function clampPlayers(value) {
+  const n = Number(value || 2);
+  return Math.min(4, Math.max(2, Number.isFinite(n) ? Math.trunc(n) : 2));
+}
+
+// İnsan adlı (seamless) bot yaradır — istifadə olunmuş adları təkrarlamır.
+function makeBot(usedNames) {
+  const pool = BOT_NAMES.filter((n) => !usedNames.includes(n));
+  const source = pool.length ? pool : BOT_NAMES;
+  const name = source[Math.floor(Math.random() * source.length)];
+  usedNames.push(name);
+  return { id: `bot-${randomId(4)}`, name, score: 0, connected: true, bot: true };
+}
+
+// Masanı hədəf oyunçu sayına qədər botlarla doldurub oyunu başladır.
+function fillAndStartRoom(code) {
+  const room = rooms.get(code);
+  if (!room || room.game) return;
+  if (room.autoFillTimer) {
+    clearTimeout(room.autoFillTimer);
+    room.autoFillTimer = null;
+  }
+  const target = clampPlayers(room.targetPlayers);
+  const used = room.players.map((p) => p.name);
+  while (room.players.length < target) {
+    room.players.push(makeBot(used));
+  }
+  if (room.players.length < 2) return;
+  startRound(room);
+  broadcastRoom(room);
+  broadcastLobby();
+  maybeRunBot(room);
+}
+
 function findTileOwner(room, hands, predicate) {
   for (const player of room.players) {
-    const tile = hands[player.id].find(predicate);
+    const tile = (hands[player.id] || []).find(predicate);
     if (tile) return { player, tile };
   }
   return null;
@@ -1552,7 +1870,7 @@ function findTileOwner(room, hands, predicate) {
 
 function findLowestDoubleOwner(room, hands) {
   return room.players
-    .flatMap((player) => hands[player.id]
+    .flatMap((player) => (hands[player.id] || [])
       .filter((tile) => tile.a === tile.b)
       .map((tile) => ({ player, tile })))
     .sort((a, b) => a.tile.a - b.tile.a)[0] || null;
@@ -1561,18 +1879,22 @@ function findLowestDoubleOwner(room, hands) {
 function phoneScore(game) {
   refreshPhone(game);
   if (!game.board.length) return 0;
+  const total = phoneOpenEndTotal(game);
+  return total > 0 && total % 5 === 0 ? total : 0;
+}
+
+function phoneOpenEndTotal(game) {
+  if (!game.board.length) return 0;
   if (game.board.length === 1) {
     const only = game.board[0];
-    const total = only.left + only.right;
-    return total > 0 && total % 5 === 0 ? total : 0;
+    return only.double && Number(only.left || 0) === 5 ? 10 : 0;
   }
 
   const leftTile = game.board[0];
   const rightTile = game.board[game.board.length - 1];
   const leftValue = leftTile.double ? Number(game.left || 0) * 2 : Number(game.left || 0);
   const rightValue = rightTile.double ? Number(game.right || 0) * 2 : Number(game.right || 0);
-  const total = leftValue + rightValue + phoneBranchScore(game.phone?.top) + phoneBranchScore(game.phone?.bottom);
-  return total > 0 && total % 5 === 0 ? total : 0;
+  return leftValue + rightValue + phoneBranchScore(game.phone?.top) + phoneBranchScore(game.phone?.bottom);
 }
 
 function refreshPhone(game) {
@@ -1590,8 +1912,9 @@ function refreshPhone(game) {
 
 function phoneBranchScore(branch) {
   if (!branch) return 0;
+  // Boş qol açıq-uc kimi sayılmır — yalnız qola daş qoyulduqdan sonra ucu sayılır.
+  if (!branch.tiles || branch.tiles.length === 0) return 0;
   const last = branch.tiles[branch.tiles.length - 1];
-  if (!last) return Number(branch.end || 0);
   return last.double ? Number(branch.end || 0) * 2 : Number(branch.end || 0);
 }
 
@@ -1727,7 +2050,9 @@ function serializeRoom(room, viewerId) {
           requiredOpeningTileId: game.requiredOpeningTileId,
           roundOver: game.roundOver,
           matchOver: game.matchOver,
-          message: game.message
+          message: game.message,
+          lastScoreEvent: game.lastScoreEvent,
+          roundSummary: game.roundSummary
         }
       : null,
     log: room.log.slice(0, 50),
@@ -1832,3 +2157,5 @@ function newRoomCode() {
 function randomId(size = 8) {
   return randomBytes(size).toString("hex");
 }
+
+// (kod baxışı düzəlişləri: restartMatch host yoxlaması, disconnect→bot, plays limiti, boş-massiv qoruyucuları)

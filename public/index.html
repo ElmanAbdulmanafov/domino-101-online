@@ -3,8 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#101820" />
-    <title>Domino Online</title>
+    <meta name="theme-color" content="#080d14" />
+    <meta name="description" content="Azərbaycanlılar üçün online Domino 101 oyunu" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Domino 101 — Online</title>
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -43,132 +49,149 @@
           <span id="avatarPreview" class="avatar-preview">?</span>
         </label>
         <button id="registerButton" class="primary" type="button">Giris et</button>
+        <div class="auth-divider"><span>ve ya</span></div>
+        <button id="googleLoginButton" class="google-login" type="button" disabled>
+          <span class="google-mark">G</span>
+          Google ile davam et
+        </button>
+        <small id="googleAuthStatus" class="auth-status"></small>
         <p id="authError" class="error"></p>
       </section>
 
-      <section id="setup" class="setup hidden">
+      <section id="setup" class="setup setup-shell hidden">
         <div class="profile-bar">
           <span id="profileAvatar" class="avatar-preview small">?</span>
           <div>
             <p class="eyebrow">Profil</p>
             <strong id="profileName">Oyuncu</strong>
-            <small id="profileStats">0 oyun · 0 qalibiyyet</small>
-          </div>
-          <button id="soundToggleButton" type="button">Ses: aciq</button>
-          <button id="logoutButton" type="button">Cixis</button>
-        </div>
-
-        <details class="profile-edit">
-          <summary>Profili duzelt</summary>
-          <label>
-            Ad soyad
-            <input id="profileNameInput" maxlength="18" autocomplete="name" />
-          </label>
-          <label>
-            Istifadeci adi
-            <input id="profileUsernameInput" maxlength="24" autocomplete="username" />
-          </label>
-          <label class="avatar-picker">
-            Profil sekli
-            <input id="profileAvatarInput" type="file" accept="image/*" />
-            <span id="profileAvatarPreview" class="avatar-preview">?</span>
-          </label>
-          <button id="saveProfileButton" type="button">Yadda saxla</button>
-        </details>
-
-        <label>
-          Adin
-          <input id="nameInput" maxlength="18" placeholder="Mes: Elman" autocomplete="nickname" />
-        </label>
-
-        <div class="choice-group" aria-label="Oyun novu">
-          <button id="game101Button" class="choice active" type="button">101</button>
-          <button id="gamePhoneButton" class="choice" type="button">Telefon</button>
-        </div>
-
-        <div class="choice-group" aria-label="Oynama formasi">
-          <button id="onlineModeButton" class="choice active" type="button">Online</button>
-          <button id="botModeButton" class="choice" type="button">Botla oyna</button>
-        </div>
-
-        <div id="botCountWrap" class="bot-count" hidden>
-          <span>Bot sayi</span>
-          <div class="choice-group compact" aria-label="Bot sayi">
-            <button id="botOneButton" class="choice active" type="button">1</button>
-            <button id="botTwoButton" class="choice" type="button">2</button>
-            <button id="botThreeButton" class="choice" type="button">3</button>
+            <small id="profileStats">0 oyun - 0 qalibiyyet</small>
           </div>
         </div>
 
-        <details class="server-settings">
-          <summary>Server ayari</summary>
-          <label>
-            Server
-            <input id="serverInput" placeholder="192.168.1.6:4173" inputmode="url" />
-          </label>
-        </details>
+        <div id="homeScreen" class="setup-screen">
+          <section id="playConfigurator" class="play-config">
+            <p class="eyebrow">Oyun növü</p>
+            <div class="choice-group game-type" aria-label="Oyun novu">
+              <button id="game101Button" class="choice active" type="button">Domino</button>
+              <button id="gamePhoneButton" class="choice" type="button">Telefon</button>
+            </div>
+            <p class="eyebrow">Oyunçu sayı</p>
+            <div class="choice-group compact" aria-label="Oyuncu sayi">
+              <button id="playerCount2Button" class="choice active" type="button">2</button>
+              <button id="playerCount3Button" class="choice" type="button">3</button>
+              <button id="playerCount4Button" class="choice" type="button">4</button>
+            </div>
+            <input id="nameInput" type="hidden" />
+            <button id="createRoomButton" class="primary play-cta" type="button">Oyna</button>
+            <div id="joinByCode" class="join">
+              <input id="roomInput" maxlength="6" placeholder="Otaq kodu — dostla oyna" />
+              <button id="joinRoomButton" type="button">Qosul</button>
+            </div>
+          </section>
 
-        <div class="actions">
-          <button id="createRoomButton" class="primary">Otaq yarat</button>
-          <div id="joinByCode" class="join">
-            <input id="roomInput" maxlength="6" placeholder="Otaq kodu" />
-            <button id="joinRoomButton">Qosul</button>
+          <div id="lastGamePanel" class="last-game hidden">
+            <div>
+              <p class="eyebrow">Son oyun</p>
+              <strong id="lastGameText">Masaya qayit</strong>
+            </div>
+            <button id="returnRoomButton" class="return-room" type="button">Qayit</button>
+          </div>
+
+          <div id="lobby" class="lobby">
+            <div class="lobby-head">
+              <p class="eyebrow">Hazir otaqlar</p>
+              <button id="refreshRoomsButton" type="button">Yenile</button>
+            </div>
+            <div id="roomList" class="room-list"></div>
           </div>
         </div>
 
-        <div id="lobby" class="lobby">
-          <div class="lobby-head">
-            <p class="eyebrow">Hazir otaqlar</p>
-            <button id="refreshRoomsButton" type="button">Yenile</button>
-          </div>
-          <div id="roomList" class="room-list"></div>
-        </div>
-
-        <div class="profile-history">
-          <div class="lobby-head">
-            <p class="eyebrow">Oyun tarixcem</p>
-            <button id="refreshHistoryButton" type="button">Yenile</button>
-          </div>
-          <div id="profileHistory" class="profile-history-list"></div>
-        </div>
-
-        <div class="leaderboard-panel">
-          <div class="lobby-head">
-            <p class="eyebrow">Reytinq</p>
-            <button id="refreshLeaderboardButton" type="button">Yenile</button>
-          </div>
-          <div class="leader-tabs" aria-label="Reytinq novu">
-            <button id="leaderWinsButton" class="choice active" type="button">Qalibiyyet</button>
-            <button id="leaderPointsButton" class="choice" type="button">Xal</button>
-            <button id="leaderGamesButton" class="choice" type="button">Oyun</button>
-          </div>
-          <div id="leaderboardList" class="leaderboard-list"></div>
-        </div>
-
-        <div class="friends-panel">
-          <div class="lobby-head">
-            <p class="eyebrow">Dostlar</p>
-            <button id="refreshFriendsButton" type="button">Yenile</button>
-          </div>
-          <form id="friendSearchForm" class="friend-search">
-            <input id="friendSearchInput" maxlength="32" placeholder="Ad ve ya username axtar" autocomplete="off" />
-            <button type="submit">Axtar</button>
-          </form>
-          <div id="friendSearchResults" class="friend-results"></div>
-          <div id="friendRequests" class="friend-requests"></div>
-          <div class="friend-chat-wrap">
-            <div id="friendList" class="friend-list"></div>
-            <div class="direct-chat">
-              <div id="directChatTitle" class="direct-chat-title">Dost sec</div>
-              <div id="directChatList" class="direct-chat-list"></div>
-              <form id="directChatForm" class="direct-chat-form">
-                <input id="directChatInput" maxlength="180" placeholder="Mesaj yaz..." autocomplete="off" />
-                <button type="submit">Gonder</button>
-              </form>
+        <div id="friendsScreen" class="setup-screen hidden">
+          <div class="friends-panel">
+            <div class="lobby-head">
+              <p class="eyebrow">Dostlar</p>
+              <button id="refreshFriendsButton" type="button">Yenile</button>
+            </div>
+            <button id="friendsPlayButton" class="primary" type="button">Dostlar ucun otaq yarat</button>
+            <form id="friendSearchForm" class="friend-search">
+              <input id="friendSearchInput" maxlength="32" placeholder="Ad ve ya username axtar" autocomplete="off" />
+              <button type="submit">Axtar</button>
+            </form>
+            <div id="friendSearchResults" class="friend-results"></div>
+            <div id="friendRequests" class="friend-requests"></div>
+            <div class="friend-chat-wrap">
+              <div id="friendList" class="friend-list"></div>
+              <div class="direct-chat">
+                <div id="directChatTitle" class="direct-chat-title">Dost sec</div>
+                <div id="directChatList" class="direct-chat-list"></div>
+                <form id="directChatForm" class="direct-chat-form">
+                  <input id="directChatInput" maxlength="180" placeholder="Mesaj yaz..." autocomplete="off" />
+                  <button type="submit">Gonder</button>
+                </form>
+              </div>
             </div>
           </div>
         </div>
 
+        <div id="leaderboardScreen" class="setup-screen hidden">
+          <div class="leaderboard-panel">
+            <div class="lobby-head">
+              <p class="eyebrow">Reytinq</p>
+              <button id="refreshLeaderboardButton" type="button">Yenile</button>
+            </div>
+            <div class="leader-tabs" aria-label="Reytinq novu">
+              <button id="leaderWinsButton" class="choice active" type="button">Qalibiyyet</button>
+              <button id="leaderPointsButton" class="choice" type="button">Xal</button>
+              <button id="leaderGamesButton" class="choice" type="button">Oyun</button>
+            </div>
+            <div id="leaderboardList" class="leaderboard-list"></div>
+          </div>
+        </div>
+
+        <div id="profileScreen" class="setup-screen hidden">
+          <div class="profile-actions">
+            <button id="soundToggleButton" type="button">Ses: aciq</button>
+            <button id="logoutButton" type="button">Cixis</button>
+          </div>
+          <details class="profile-edit">
+            <summary>Profili duzelt</summary>
+            <label>
+              Ad soyad
+              <input id="profileNameInput" maxlength="18" autocomplete="name" />
+            </label>
+            <label>
+              Istifadeci adi
+              <input id="profileUsernameInput" maxlength="24" autocomplete="username" />
+            </label>
+            <label class="avatar-picker">
+              Profil sekli
+              <input id="profileAvatarInput" type="file" accept="image/*" />
+              <span id="profileAvatarPreview" class="avatar-preview">?</span>
+            </label>
+            <button id="saveProfileButton" type="button">Yadda saxla</button>
+          </details>
+          <details class="server-settings">
+            <summary>Server ayari</summary>
+            <label>
+              Server
+              <input id="serverInput" placeholder="192.168.1.6:4173" inputmode="url" />
+            </label>
+          </details>
+          <div class="profile-history">
+            <div class="lobby-head">
+              <p class="eyebrow">Oyun tarixcem</p>
+              <button id="refreshHistoryButton" type="button">Yenile</button>
+            </div>
+            <div id="profileHistory" class="profile-history-list"></div>
+          </div>
+        </div>
+
+        <nav class="bottom-nav" aria-label="Esas bolmeler">
+          <button id="navHomeButton" class="active" type="button">Ana</button>
+          <button id="navFriendsButton" type="button">Dostlar</button>
+          <button id="navLeaderboardButton" type="button">Top</button>
+          <button id="navProfileButton" type="button">Profil</button>
+        </nav>
         <p id="error" class="error"></p>
       </section>
 
@@ -182,11 +205,11 @@
             <div id="roundBadge" class="round-badge">El 0</div>
             <button id="inviteButton" type="button">Devet et</button>
             <button id="leaveRoomButton" type="button">Oyundan cix</button>
-            <button id="startButton" class="primary">Baslat</button>
+            <button id="startButton" class="primary" type="button">Baslat</button>
           </div>
         </div>
-
         <p id="message" class="message"></p>
+        <div id="scoreToastLayer" class="score-toast-layer" aria-live="polite"></div>
 
         <div class="table-area">
           <div id="seatTop" class="seat seat-top"></div>
@@ -197,42 +220,55 @@
         </div>
 
         <div class="playbar">
-          <button id="playLeftButton">Sola qoy</button>
-          <button id="passButton">Pass / das gotur</button>
-          <button id="playRightButton">Saga qoy</button>
-          <button id="playPhoneTopButton" class="phone-action" hidden>Telefon ust</button>
-          <button id="playPhoneBottomButton" class="phone-action" hidden>Telefon alt</button>
+          <button id="playLeftButton" type="button">Sola qoy</button>
+          <button id="passButton" type="button">Pass / das gotur</button>
+          <button id="playRightButton" type="button">Saga qoy</button>
+          <button id="playPhoneTopButton" class="phone-action" type="button" hidden>Telefon ust</button>
+          <button id="playPhoneBottomButton" class="phone-action" type="button" hidden>Telefon alt</button>
+          <button id="playAllDoublesButton" class="phone-action all-doubles" type="button" hidden>Qosalari oyna</button>
         </div>
-
         <div id="hand" class="hand"></div>
 
-        <section class="chat-panel">
-          <div class="chat-head">
-            <p class="eyebrow">Masa sohbeti</p>
-            <span id="chatCount">0</span>
-          </div>
+        <nav class="game-tools" aria-label="Oyun panelleri">
+          <button id="gameScoreButton" type="button">Xallar</button>
+          <button id="gameChatButton" type="button">Sohbet <span id="chatCount">0</span></button>
+          <button id="gameLogButton" type="button">Gedisler</button>
+        </nav>
+
+        <section id="chatPanel" class="chat-panel game-panel hidden">
+          <div class="chat-head"><p class="eyebrow">Masa sohbeti</p></div>
           <div id="chatList" class="chat-list"></div>
           <form id="chatForm" class="chat-form">
             <input id="chatInput" maxlength="180" placeholder="Mesaj yaz..." autocomplete="off" />
             <button id="chatSendButton" type="submit">Gonder</button>
           </form>
         </section>
-
-        <section class="score-panel">
+        <section id="scorePanel" class="score-panel game-panel hidden">
           <div class="score-head">
             <p class="eyebrow">Xal cedveli</p>
             <strong id="scoreTarget">0</strong>
           </div>
           <div id="scoreboard" class="scoreboard"></div>
         </section>
-
-        <div class="history">
+        <div id="historyPanel" class="history game-panel hidden">
           <p class="eyebrow">Gedisler</p>
           <div id="log"></div>
         </div>
+
+        <div id="roundSummaryModal" class="round-summary-modal hidden" role="dialog" aria-modal="true" aria-labelledby="roundSummaryTitle">
+          <div class="round-summary-box">
+            <div class="round-summary-head">
+              <div>
+                <p class="eyebrow">El hesabatı</p>
+                <h2 id="roundSummaryTitle">El bitdi</h2>
+              </div>
+              <button id="roundSummaryCloseButton" type="button" aria-label="Bagla">Bagla</button>
+            </div>
+            <div id="roundSummaryBody" class="round-summary-body"></div>
+          </div>
+        </div>
       </section>
     </main>
-
     <script src="/app.js" type="module"></script>
   </body>
 </html>
